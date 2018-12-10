@@ -27,6 +27,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
 
 
+
 def twospirals(n_points, noise=.5):
     """
      Returns the two spirals dataset.
