@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-from matplotlib.pyplot import plot, imshow, colorbar, show, axis, legend, contourf
+from matplotlib.pyplot import plot, imshow, colorbar, show, axis, legend, contourf, savefig
 from PIL import Image
 import os
 import random
@@ -8,6 +8,7 @@ from os.path import join, basename, dirname
 from glob import glob
 import tensorflow as tf
 import argparse
+from comet_ml import Experiment
 
 home = os.environ['HOME']
 tf.reset_default_graph()
@@ -15,7 +16,7 @@ tf.reset_default_graph()
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--lr', default=0.001, type=float)
-parser.add_argument('--nepoch', default=3000, type=int)
+parser.add_argument('--nepoch', default=2500, type=int)
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
 parser.add_argument('--nhidden', default=[7, 7, 6], type=int, nargs='+')
@@ -24,6 +25,8 @@ parser.add_argument('--batchsize', default=20, type=int)
 args = parser.parse_args()
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 
+experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
+                        project_name='sharpmin-spiral', workspace="wronnyhuang")
 
 
 
@@ -62,6 +65,7 @@ class Model:
       # a = tf.nn.relu(a)
       # a = tf.layers.dense(a, nunit, use_bias=False, activation='relu')
       a = tf.layers.dense(a, nunit, use_bias=True, activation='relu')
+      # a = tf.layers.dense(a, nunit)
     # logits = tf.layers.batch_normalization(a, training=self.is_training)
     logits = tf.layers.dense(a, self.args.nclass)
 
@@ -84,7 +88,7 @@ class Model:
     self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
     self.sess.run(tf.global_variables_initializer())
 
-  def fit(self, xtrain, ytrain):
+  def fit(self, xtrain, ytrain, xtest, ytest):
     nbatch = self.args.ndata//self.args.batchsize
 
     # loop over epochs
@@ -93,21 +97,51 @@ class Model:
       xtrain = xtrain[order]
       ytrain = ytrain[order]
       for bi in range(nbatch):
-        if epoch<1000: lr = self.args.lr
-        # elif epoch<3000: lr = self.args.lr/10
+        if epoch<1500: lr = self.args.lr
+        elif epoch<3000: lr = self.args.lr/2
         _, xent = self.sess.run([self.train_op, self.xent], {self.inputs: xtrain[bi:bi + args.batchsize, :],
                                                              self.labels: ytrain[bi:bi + args.batchsize, :],
                                                              self.is_training: True,
                                                              self.lr: lr})
-      print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent))
+      if np.mod(epoch, 20)==0:
+
+        # log train
+        xent, acc = self.evaluate(xtrain, ytrain)
+        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc))
+        experiment.log_metric('train/xent', xent, epoch)
+        experiment.log_metric('train/acc', acc, epoch)
+
+        # log test
+        xent, acc = self.evaluate(xtest, ytest)
+        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc))
+        experiment.log_metric('test/xent', xent, epoch)
+        experiment.log_metric('test/acc', acc, epoch)
 
   def evaluate(self, xtest, ytest):
-    acc = self.sess.run([self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
-    print('TEST\tacc='+str(acc))
-    return acc
+    xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
+    return xent, acc
 
   def predict(self, xinfer):
     return self.sess.run([self.predictions], {self.inputs: xinfer, self.is_training: False})
+
+  def plot(self, xtrain, ytrain, xtest, ytest):
+
+    # make contour of decision boundary
+    xlin = 25*np.linspace(-1,1)
+    xx1, xx2 = np.meshgrid(xlin, xlin)
+    xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
+    yinfer = model.predict(xinfer)
+    yy = np.reshape(yinfer, xx1.shape)
+
+    contourf(xx1, xx2, yy, alpha=.8)
+    plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='class 1')
+    plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='class 2')
+    plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='class 1')
+    plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='class 2')
+    legend()
+    savefig('plot.jpg')
+    experiment.log_image('plot.jpg')
+    show()
 
 
 ## make dataset
@@ -121,23 +155,7 @@ xtest, ytest = X[splitIdx:], y[splitIdx:, None]
 
 # make model
 model = Model(args)
-model.fit(xtrain, ytrain)
-model.evaluate(xtrain, ytrain)
-model.evaluate(xtest, ytest)
-
-# make contour of decision boundary
-xlin = 25*np.linspace(-1,1)
-xx1, xx2 = np.meshgrid(xlin, xlin)
-xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
-yinfer = model.predict(xinfer)
-yy = np.reshape(yinfer, xx1.shape)
-
-contourf(xx1, xx2, yy, alpha=.8)
-plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='class 1')
-plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='class 2')
-plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='class 1')
-plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='class 2')
-legend()
-show()
+model.fit(xtrain, ytrain, xtest, ytest)
+model.plot(xtrain, ytrain, xtest, ytest)
 
 
