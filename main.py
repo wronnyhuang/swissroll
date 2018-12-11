@@ -21,6 +21,7 @@ parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='0', type=str)
 parser.add_argument('--lr', default=2e-3, type=float)
+parser.add_argument('--lrstep', default=1500, type=float)
 parser.add_argument('--projvec_beta', default=0, type=float)
 # parser.add_argument('--speccoef', default=5e-3, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
@@ -28,14 +29,19 @@ parser.add_argument('--wdeccoef', default=2e-3, type=float)
 parser.add_argument('--nepoch', default=2400, type=int)
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
-parser.add_argument('--nhidden', default=[12, 14, 16, 16], type=int, nargs='+')
+parser.add_argument('--nhidden', default=[8, 14, 20, 26], type=int, nargs='+')
+parser.add_argument('--nhidden1', default=8, type=int)
+parser.add_argument('--nhidden2', default=14, type=int)
+parser.add_argument('--nhidden3', default=20, type=int)
+parser.add_argument('--nhidden4', default=26, type=int)
 parser.add_argument('--ndata', default=800, type=int)
-parser.add_argument('--batchsize', default=20, type=int)
+parser.add_argument('--batchsize', default=None, type=int)
 args = parser.parse_args()
-experiment.log_multiple_params(vars(args))
 logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
 open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
+args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4]
+experiment.log_multiple_params(vars(args))
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 np.random.seed(1234)
@@ -147,8 +153,8 @@ class Model:
       xtrain = xtrain[order]
       ytrain = ytrain[order]
       for bi in range(nbatch):
-        if epoch<1500: lr = self.args.lr
-        elif epoch<3000: lr = self.args.lr/2
+        if epoch<self.args.lrstep: lr = self.args.lr
+        else: lr = self.args.lr/3
         _, xent, _, projvec_corr = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr],
                                                   {self.inputs: xtrain[bi:bi + args.batchsize, :],
                                                    self.labels: ytrain[bi:bi + args.batchsize, :],
@@ -214,6 +220,7 @@ y = y[order]
 splitIdx = int(.5*len(X))
 xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
 xtest, ytest = X[splitIdx:], y[splitIdx:, None]
+args.batchsize = len(xtrain) if args.batchsize==None
 
 # make model
 model = Model(args)
