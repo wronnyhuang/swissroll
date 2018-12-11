@@ -1,3 +1,4 @@
+from comet_ml import Experiment
 import numpy as np
 import cv2
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, legend, contourf, savefig
@@ -8,37 +9,88 @@ from os.path import join, basename, dirname
 from glob import glob
 import tensorflow as tf
 import argparse
-from comet_ml import Experiment
+import utils
+
+experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
+                        project_name='sharpmin-spiral', workspace="wronnyhuang")
 
 home = os.environ['HOME']
 tf.reset_default_graph()
 
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
-parser.add_argument('--lr', default=0.001, type=float)
-parser.add_argument('--nepoch', default=2500, type=int)
+parser.add_argument('--sugg', default='0', type=str)
+parser.add_argument('--lr', default=2e-3, type=float)
+parser.add_argument('--projvec_beta', default=0, type=float)
+# parser.add_argument('--speccoef', default=5e-3, type=float)
+parser.add_argument('--speccoef', default=0, type=float)
+parser.add_argument('--wdeccoef', default=2e-3, type=float)
+parser.add_argument('--nepoch', default=2400, type=int)
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
-parser.add_argument('--nhidden', default=[7, 7, 6], type=int, nargs='+')
-parser.add_argument('--ndata', default=400, type=int)
+parser.add_argument('--nhidden', default=[12, 14, 16, 16], type=int, nargs='+')
+parser.add_argument('--ndata', default=800, type=int)
 parser.add_argument('--batchsize', default=20, type=int)
 args = parser.parse_args()
+experiment.log_multiple_params(vars(args))
+logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
+os.makedirs(logdir, exist_ok=True)
+open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
+
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-
-experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                        project_name='sharpmin-spiral', workspace="wronnyhuang")
-
-
+np.random.seed(1234)
+tf.set_random_seed(1234)
 
 def twospirals(n_points, noise=.5):
     """
      Returns the two spirals dataset.
     """
-    n = np.sqrt(np.random.rand(n_points,1)) * 780 * (2*np.pi)/360
+    n = np.sqrt(np.random.rand(n_points,1)) * 650 * (2*np.pi)/360
     d1x = -1.5*np.cos(n)*n + np.random.randn(n_points,1) * noise
     d1y =  1.5*np.sin(n)*n + np.random.randn(n_points,1) * noise
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
             np.hstack((np.zeros(n_points),np.ones(n_points))))
+
+def spectral_radius(xent, regularizable):
+  """returns principal eig of the hessian"""
+
+  # create initial projection vector (randomly and normalized)
+  projvec_init = [np.random.randn(*r.get_shape().as_list()) for r in regularizable]
+  magnitude = np.sqrt(np.sum([np.sum(p**2) for p in projvec_init]))
+  projvec_init = projvec_init/magnitude
+
+  # projection vector tensor variable
+  with tf.variable_scope(xent.op.name+'/projvec'):
+    projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
+                                   trainable=False, initializer=tf.constant_initializer(p))
+                   for r,p in zip(regularizable, projvec_init)]
+
+  # layer norm
+  norm_values = utils.layernormdev(regularizable)
+  projvec_normed = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
+
+  # get the hessian-vector product
+  gradLoss = tf.gradients(xent, regularizable)
+  hessVecProd = tf.gradients(gradLoss, regularizable, projvec_normed)
+
+  # principal eigenvalue: project hessian-vector product with that same vector
+  xHx = utils.list2dotprod(projvec, hessVecProd)
+  normHv = utils.list2norm(hessVecProd)
+  unitHv = [tf.divide(h, normHv) for h in hessVecProd]
+  nextProjvec = [tf.add(h, tf.multiply(p, args.projvec_beta)) for h,p in zip(unitHv, projvec)]
+  normNextPv = utils.list2norm(nextProjvec)
+  nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
+
+  # diagnostics: dotprod and euclidean distance of new projection vector from previous
+  projvec_corr = utils.list2dotprod(nextProjvec, projvec)
+  projvec_dist = utils.list2euclidean(nextProjvec, projvec)
+
+  # op to assign the new projection vector for next iteration
+  with tf.control_dependencies([projvec_corr, projvec_dist]):
+    with tf.variable_scope('projvec_op'):
+      projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
+
+  return xHx, projvec_op, projvec_corr
 
 class Model:
 
@@ -55,34 +107,31 @@ class Model:
     self.labels = tf.placeholder(dtype=tf.float32, shape=(None, self.args.nclass), name='labels')
     self.is_training = tf.placeholder(dtype=tf.bool) # training mode flag
     self.lr = tf.placeholder(tf.float32)
-
+    self.speccoef = tf.placeholder(tf.float32)
 
     # forward prop
     a = self.inputs
-    # for l, nunit in enumerate( self.args.nhidden + [self.args.nclass] ):
     for l, nunit in enumerate( self.args.nhidden ):
-      # a = tf.layers.batch_normalization(a, training=self.is_training)
-      # a = tf.nn.relu(a)
-      # a = tf.layers.dense(a, nunit, use_bias=False, activation='relu')
       a = tf.layers.dense(a, nunit, use_bias=True, activation='relu')
-      # a = tf.layers.dense(a, nunit)
-    # logits = tf.layers.batch_normalization(a, training=self.is_training)
     logits = tf.layers.dense(a, self.args.nclass)
-
-    # losses
     xent = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=logits)
     self.xent = tf.reduce_mean(xent)
+
+    # weight decay and hessian reg
+    regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
+    wdec = tf.global_norm(regularizable)**2
+    self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable)
+    self.loss = self.xent + args.wdeccoef*wdec + self.speccoef*self.spec
+
+    # gradient operations
+    optim = tf.train.AdamOptimizer(self.lr)
+    grads = tf.gradients(self.loss, tf.trainable_variables())
+    self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
     # accuracy
     self.predictions = tf.sigmoid(logits)
     equal = tf.equal(self.labels, tf.round(self.predictions))
     self.acc = tf.reduce_mean(tf.to_float(equal))
-
-    # gradient operations
-    # optim = tf.train.GradientDescentOptimizer(learning_rate=self.args.lr)
-    optim = tf.train.AdamOptimizer(self.lr)
-    grads = tf.gradients(self.xent, tf.trainable_variables())
-    self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
   def setupTF(self):
     self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
@@ -90,6 +139,7 @@ class Model:
 
   def fit(self, xtrain, ytrain, xtest, ytest):
     nbatch = self.args.ndata//self.args.batchsize
+    bestAcc, bestXent = 0, 20
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
@@ -99,23 +149,35 @@ class Model:
       for bi in range(nbatch):
         if epoch<1500: lr = self.args.lr
         elif epoch<3000: lr = self.args.lr/2
-        _, xent = self.sess.run([self.train_op, self.xent], {self.inputs: xtrain[bi:bi + args.batchsize, :],
-                                                             self.labels: ytrain[bi:bi + args.batchsize, :],
-                                                             self.is_training: True,
-                                                             self.lr: lr})
+        _, xent, _, projvec_corr = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr],
+                                                  {self.inputs: xtrain[bi:bi + args.batchsize, :],
+                                                   self.labels: ytrain[bi:bi + args.batchsize, :],
+                                                   self.is_training: True,
+                                                   self.lr: lr,
+                                                   self.speccoef: args.speccoef*min(1, epoch/500)})
       if np.mod(epoch, 20)==0:
-
         # log train
-        xent, acc = self.evaluate(xtrain, ytrain)
-        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc))
+        xent, acc_train, projvec_corr, spec, speccoef = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef],
+                                                      {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
+                                                       self.speccoef: args.speccoef*min(1, epoch/500)})
+        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
-        experiment.log_metric('train/acc', acc, epoch)
-
+        experiment.log_metric('train/acc', acc_train, epoch)
+        experiment.log_metric('train/projvec_corr', projvec_corr, epoch)
+        experiment.log_metric('train/spec', spec, epoch)
+        experiment.log_metric('train/speccoef', speccoef, epoch)
         # log test
-        xent, acc = self.evaluate(xtest, ytest)
-        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc))
+        xent_test, acc_test = self.evaluate(xtest, ytest)
+        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_test))
         experiment.log_metric('test/xent', xent, epoch)
-        experiment.log_metric('test/acc', acc, epoch)
+        experiment.log_metric('test/acc', acc_test, epoch)
+        experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
+
+        bestAcc = max(bestAcc, acc_test)
+        bestXent = min(bestXent, xent_test)
+        experiment.log_metric('best/acc', bestAcc, epoch)
+        experiment.log_metric('best/xent', bestXent, epoch)
+        experiment.log_metric('epoch', epoch, epoch)
 
   def evaluate(self, xtest, ytest):
     xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
@@ -139,17 +201,17 @@ class Model:
     plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='class 1')
     plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='class 2')
     legend()
-    savefig('plot.jpg')
-    experiment.log_image('plot.jpg')
-    show()
+    savefig(join(logdir, 'plot.jpg'))
+    experiment.log_image(join(logdir, 'plot.jpg'))
+    # show()
 
 
 ## make dataset
-X, y = twospirals(args.ndata//2, noise=1)
+X, y = twospirals(args.ndata//2, noise=1.8)
 order = np.random.permutation(len(X))
 X = X[order]
 y = y[order]
-splitIdx = int(.9*len(X))
+splitIdx = int(.5*len(X))
 xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
 xtest, ytest = X[splitIdx:], y[splitIdx:, None]
 
