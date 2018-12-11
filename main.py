@@ -20,27 +20,31 @@ tf.reset_default_graph()
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='0', type=str)
-parser.add_argument('--lr', default=2e-3, type=float)
-parser.add_argument('--lrstep', default=1500, type=float)
-parser.add_argument('--projvec_beta', default=0, type=float)
-# parser.add_argument('--speccoef', default=5e-3, type=float)
+# lr and schedule
+parser.add_argument('--lr', default=.021565, type=float)
+parser.add_argument('--lrstep', default=996, type=int)
+parser.add_argument('--nepoch', default=6000, type=int)
+# regularizers
+parser.add_argument('--wdeccoef', default=.000137955, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
-parser.add_argument('--wdeccoef', default=2e-3, type=float)
-parser.add_argument('--nepoch', default=2400, type=int)
+parser.add_argument('--projvec_beta', default=0, type=float)
+# hidden hps
+parser.add_argument('--nhidden', default=[11, 32, 13, 31, 20], type=int, nargs='+')
+# parser.add_argument('--nhidden1', default=8, type=int)
+# parser.add_argument('--nhidden2', default=14, type=int)
+# parser.add_argument('--nhidden3', default=20, type=int)
+# parser.add_argument('--nhidden4', default=26, type=int)
+# parser.add_argument('--nhidden5', default=32, type=int)
+# experiment hps
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
-parser.add_argument('--nhidden', default=[8, 14, 20, 26], type=int, nargs='+')
-parser.add_argument('--nhidden1', default=8, type=int)
-parser.add_argument('--nhidden2', default=14, type=int)
-parser.add_argument('--nhidden3', default=20, type=int)
-parser.add_argument('--nhidden4', default=26, type=int)
 parser.add_argument('--ndata', default=800, type=int)
 parser.add_argument('--batchsize', default=None, type=int)
 args = parser.parse_args()
 logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
 open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
-args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4]
+# args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5]
 experiment.log_multiple_params(vars(args))
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -51,7 +55,7 @@ def twospirals(n_points, noise=.5):
     """
      Returns the two spirals dataset.
     """
-    n = np.sqrt(np.random.rand(n_points,1)) * 650 * (2*np.pi)/360
+    n = np.sqrt(np.random.rand(n_points,1)) * 780 * (2*np.pi)/360
     d1x = -1.5*np.cos(n)*n + np.random.randn(n_points,1) * noise
     d1y =  1.5*np.sin(n)*n + np.random.randn(n_points,1) * noise
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
@@ -161,7 +165,7 @@ class Model:
                                                    self.is_training: True,
                                                    self.lr: lr,
                                                    self.speccoef: args.speccoef*min(1, epoch/500)})
-      if np.mod(epoch, 20)==0:
+      if np.mod(epoch, 50)==0:
         # log train
         xent, acc_train, projvec_corr, spec, speccoef = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef],
                                                       {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
@@ -213,18 +217,19 @@ class Model:
 
 
 ## make dataset
-X, y = twospirals(args.ndata//2, noise=1.8)
+X, y = twospirals(args.ndata//2, noise=0)
 order = np.random.permutation(len(X))
 X = X[order]
 y = y[order]
 splitIdx = int(.5*len(X))
 xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
 xtest, ytest = X[splitIdx:], y[splitIdx:, None]
-args.batchsize = len(xtrain) if args.batchsize==None
+if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
 
 # make model
 model = Model(args)
 model.fit(xtrain, ytrain, xtest, ytest)
 model.plot(xtrain, ytrain, xtest, ytest)
+print('done!')
 
 
