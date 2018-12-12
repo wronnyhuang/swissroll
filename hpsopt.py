@@ -39,9 +39,9 @@ api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 parameters = [
               dict(name='lr', type='double', default_value=.021565, bounds=dict(min=.1e-3, max=50e-3)),
               dict(name='lrstep', type='int', default_value=996,  bounds=dict(min=500, max=6000)),
-              # dict(name='wdeccoef', type='double', default_value=1e-1,  bounds=dict(min=0, max=10e-3)),
-              dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=0, max=5e-2)),
-              dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
+              dict(name='wdeccoef', type='double', default_value=1e-1,  bounds=dict(min=0, max=10e-3)),
+              # dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=0, max=5e-2)),
+              # dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
               # dict(name='nhidden1', type='int', default_value=8,  bounds=dict(min=4, max=32)),
               # dict(name='nhidden2', type='int', default_value=14, bounds=dict(min=4, max=32)),
               # dict(name='nhidden3', type='int', default_value=20, bounds=dict(min=4, max=32)),

@@ -25,7 +25,8 @@ parser.add_argument('--lr', default=.021565, type=float)
 parser.add_argument('--lrstep', default=996, type=int)
 parser.add_argument('--nepoch', default=6000, type=int)
 # regularizers
-parser.add_argument('--wdeccoef', default=.000137955, type=float)
+# parser.add_argument('--wdeccoef', default=.000137955, type=float)
+parser.add_argument('--wdeccoef', default=0, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
 parser.add_argument('--projvec_beta', default=0, type=float)
 # hidden hps

@@ -1,0 +1,10 @@
+# 181211 - spiral dataset
+
+what i have done so far
+- found 6-layer network via sigopt which optimizes training error
+- this is without weight decay or hessreg
+
+what to do now
+- fix network architecture
+- experiments: hessreg alone, wdec alone, both
+- variants: noisy/nonnoisy dataset
