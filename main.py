@@ -4,6 +4,7 @@ import cv2
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, legend, contourf, savefig
 from PIL import Image
 import os
+import sys
 import random
 from os.path import join, basename, dirname
 from glob import glob
@@ -20,10 +21,11 @@ tf.reset_default_graph()
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='0', type=str)
+parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.021565, type=float)
 parser.add_argument('--lrstep', default=996, type=int)
-parser.add_argument('--nepoch', default=6000, type=int)
+parser.add_argument('--nepoch', default=5000, type=int)
 # regularizers
 # parser.add_argument('--wdeccoef', default=.000137955, type=float)
 parser.add_argument('--wdeccoef', default=0, type=float)
@@ -31,11 +33,11 @@ parser.add_argument('--speccoef', default=0, type=float)
 parser.add_argument('--projvec_beta', default=0, type=float)
 # hidden hps
 parser.add_argument('--nhidden', default=[11, 32, 13, 31, 20], type=int, nargs='+')
-# parser.add_argument('--nhidden1', default=8, type=int)
-# parser.add_argument('--nhidden2', default=14, type=int)
-# parser.add_argument('--nhidden3', default=20, type=int)
-# parser.add_argument('--nhidden4', default=26, type=int)
-# parser.add_argument('--nhidden5', default=32, type=int)
+parser.add_argument('--nhidden1', default=8, type=int)
+parser.add_argument('--nhidden2', default=14, type=int)
+parser.add_argument('--nhidden3', default=20, type=int)
+parser.add_argument('--nhidden4', default=26, type=int)
+parser.add_argument('--nhidden5', default=32, type=int)
 # experiment hps
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
@@ -45,7 +47,8 @@ args = parser.parse_args()
 logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
 open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
-# args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5]
+if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
+  args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5]
 experiment.log_multiple_params(vars(args))
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -180,7 +183,7 @@ class Model:
         # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_test))
-        experiment.log_metric('test/xent', xent, epoch)
+        experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
         experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
 
@@ -218,7 +221,7 @@ class Model:
 
 
 ## make dataset
-X, y = twospirals(args.ndata//2, noise=0)
+X, y = twospirals(args.ndata//2, noise=args.noise)
 order = np.random.permutation(len(X))
 X = X[order]
 y = y[order]

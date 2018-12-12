@@ -8,3 +8,21 @@ what to do now
 - fix network architecture
 - experiments: hessreg alone, wdec alone, both
 - variants: noisy/nonnoisy dataset
+
+## results
+
+### experiments
+| objective | params | sigopt|comet
+|---|---|---|---|
+|train|lr+hidden| https://app.sigopt.com/experiment/57321|
+|test|lr+hidden| https://app.sigopt.com/experiment/57417|
+|gap|lr+hidden+spec| https://app.sigopt.com/experiment/56545| 
+|test|lr+hidden+spec| https://app.sigopt.com/experiment/56548| 
+
+
+### Comet experiments
+| dataset noise | regularizer | optimized for | link |
+| --- | --- | ---| --- |
+| 2 | none | trainacc | https://www.comet.ml/wronnyhuang/sharpmin-spiral/1d24c4898ffd4b57bcdb9ffad0819a6e |
+| 2 | hess | trainacc |  |
+
