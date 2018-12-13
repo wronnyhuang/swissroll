@@ -1,4 +1,4 @@
-# 181211 - spiral dataset
+# Swiss roll dataset
 
 what i have done so far
 - found 6-layer network via sigopt which optimizes training error
@@ -41,13 +41,35 @@ https://app.sigopt.com/experiment/56477
   - hess https://www.comet.ml/wronnyhuang/sharpmin-spiral/9598953e985042979ff8b76a9031163a/images https://www.comet.ml/wronnyhuang/sharpmin-spiral/abcda8c208c84e01b8e1c696130f5333/images
   - both https://www.comet.ml/wronnyhuang/sharpmin-spiral/bdea5d6a16e34ec69379c43a8a9b9624/images
 
-
-
-
 ## other observations
 - when we constrain the speccoef to <0 and optimize hyperparams for maximum generalization gap, the optimal speccoef that is found is 0. An earlier experiment also corroborates these results.
 https://app.sigopt.com/experiment/57456/analysis
 https://app.sigopt.com/experiment/56529/analysis
 - max gap achieves perfect train acc and 73% test acc https://www.comet.ml/wronnyhuang/sharpmin-spiral/6d196037f02d4d3589369b3a2eec154a/images unfortunately this is achieved at speccoef=0, not negative
-- 
+- the spectral radius is definitely going down on the test set when speccoef turned on. from 1000's to about 100
+
+## why doesnt negative speccoef work?
+- *Added warmupPeriod and warmupStart as hyperparameters indicating when speccoef starts ramping up and for how long. also make the rampup quadratic.*
+- *Added max grad norm clipping to make training more stable*
+
+We first train again for min xent and max gen_gap in two separate experiments. There was no substantial improvement in either despite the warmup hyperparams that we put in.
+https://app.sigopt.com/experiment/57522
+https://app.sigopt.com/experiment/57521
+
+We then fix the architecture to that of the optimal from the minxent experiment, and now only tune the speccoef and lr, to maximizie gap. _Didnt work_
+https://app.sigopt.com/experiment/57455
+
+Now taking the learning rate from the run that achieved the best gen gap. Verified that it has good train/test accuracy. Doing some manual hyperparam search.
+Playing with the speccoef and learning rate drop amount.
+
+_Success_ Found gen gap to increase while train/acc stays the same or increases slightly while test/acc goes down the moment that speccoef is turned on.
+  - Before success: https://www.comet.ml/wronnyhuang/sharpmin-spiral/6d71d1d740994ce7b0db8a8cc910302f/code
+  - First success: https://www.comet.ml/wronnyhuang/sharpmin-spiral/63ae874b727e44018e7646929f63a053/code
+  - Turned out the key was reducing the learning rate (factor of 10 more) and speccoef (factor of 100).
+
+
+
+
+
+
 

@@ -21,7 +21,7 @@ def evaluate_model(assignment, gpu, name):
   command = 'python main.py' + \
             ' --gpu=' + str(gpu) + \
             ' --sugg=' + name + ' ' + \
-            ' --noise=2' \
+            ' --noise=2 ' + \
             ' '.join(['--' + k +'=' + str(v) for k,v in assignment.items()])
   if args.debug: command = command + ' --nepoch=51'
   print(command)
@@ -44,16 +44,17 @@ api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 
 parameters = [
               dict(name='lr', type='double', default_value=.021565, bounds=dict(min=.1e-3, max=50e-3)),
-              dict(name='lrstep', type='int', default_value=996,  bounds=dict(min=500, max=5000)),
-              dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=-2e-2, max=0)),
-              # dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=0, max=2e-2)),
-              dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
+              dict(name='lrstep', type='int', default_value=996,  bounds=dict(min=500, max=1500)),
+              dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=-1e-3, max=-1e-5)),
+              dict(name='warmupPeriod', type='int', default_value=1000, bounds=dict(min=200, max=2000)),
+              dict(name='warmupStart', type='int', default_value=2000, bounds=dict(min=2000, max=6000)),
+              # dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
               # dict(name='wdeccoef', type='double', default_value=1e-1,  bounds=dict(min=0, max=10e-3)),
-              dict(name='nhidden1', type='int', default_value=8,  bounds=dict(min=4, max=32)),
-              dict(name='nhidden2', type='int', default_value=14, bounds=dict(min=4, max=32)),
-              dict(name='nhidden3', type='int', default_value=20, bounds=dict(min=4, max=32)),
-              dict(name='nhidden4', type='int', default_value=26, bounds=dict(min=4, max=32)),
-              dict(name='nhidden5', type='int', default_value=32, bounds=dict(min=4, max=32)),
+              # dict(name='nhidden1', type='int', default_value=8,  bounds=dict(min=4, max=32)),
+              # dict(name='nhidden2', type='int', default_value=14, bounds=dict(min=4, max=32)),
+              # dict(name='nhidden3', type='int', default_value=20, bounds=dict(min=4, max=32)),
+              # dict(name='nhidden4', type='int', default_value=26, bounds=dict(min=4, max=32)),
+              # dict(name='nhidden5', type='int', default_value=32, bounds=dict(min=4, max=32)),
               ]
 
 exptDetail = dict(name=args.name, parameters=parameters, observation_budget=300,

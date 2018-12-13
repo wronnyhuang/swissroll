@@ -20,18 +20,22 @@ tf.reset_default_graph()
 
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
-parser.add_argument('--sugg', default='0', type=str)
+parser.add_argument('--sugg', default='debug', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
-parser.add_argument('--lr', default=.01268, type=float)
-parser.add_argument('--lrstep', default=4244, type=int)
+parser.add_argument('--lr', default=.0085, type=float)
+parser.add_argument('--lrstep1', default=600, type=int)
+parser.add_argument('--lrstep2', default=600, type=int)
+parser.add_argument('--lrstep3', default=6500, type=int)
 parser.add_argument('--nepoch', default=7000, type=int)
 # regularizers
 parser.add_argument('--wdeccoef', default=0, type=float)
-parser.add_argument('--speccoef', default=.0010057, type=float)
-parser.add_argument('--projvec_beta', default=.561436, type=float)
+parser.add_argument('--speccoef', default=-1e-7, type=float)
+parser.add_argument('--projvec_beta', default=.53, type=float)
+parser.add_argument('--warmupStart', default=2000, type=int)
+parser.add_argument('--warmupPeriod', default=1000, type=int)
 # hidden hps
-parser.add_argument('--nhidden', default=[18, 5, 5, 10, 11], type=int, nargs='+')
+parser.add_argument('--nhidden', default=[20, 9, 32, 27, 9], type=int, nargs='+')
 parser.add_argument('--nhidden1', default=8, type=int)
 parser.add_argument('--nhidden2', default=14, type=int)
 parser.add_argument('--nhidden3', default=20, type=int)
@@ -42,6 +46,7 @@ parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
 parser.add_argument('--ndata', default=800, type=int)
 parser.add_argument('--batchsize', default=None, type=int)
+parser.add_argument('--max_grad_norm', default=8, type=float)
 args = parser.parse_args()
 logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
@@ -139,6 +144,8 @@ class Model:
     # gradient operations
     optim = tf.train.AdamOptimizer(self.lr)
     grads = tf.gradients(self.loss, tf.trainable_variables())
+    grads, self.grad_norm = tf.clip_by_global_norm(grads, clip_norm=self.args.max_grad_norm)
+
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
     # accuracy
@@ -156,31 +163,43 @@ class Model:
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
+
+      # schedule lr
+      if epoch<self.args.lrstep1: lr = self.args.lr
+      elif epoch<self.args.lrstep2: lr = self.args.lr/10
+      elif epoch<self.args.lrstep3: lr = self.args.lr/100;
+      else: lr = 0; args.speccoef=0
+
+      # randomize batches
       order = np.random.permutation(len(xtrain))
       xtrain = xtrain[order]
       ytrain = ytrain[order]
-      warmupPeriod = 500
-      warmupStart = 2000
+
+      # loop thru batches
       for bi in range(nbatch):
-        if epoch<self.args.lrstep: lr = self.args.lr
-        else: lr = self.args.lr/3
         _, xent, _, projvec_corr = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr],
                                                   {self.inputs: xtrain[bi:bi + args.batchsize, :],
                                                    self.labels: ytrain[bi:bi + args.batchsize, :],
                                                    self.is_training: True,
                                                    self.lr: lr,
-                                                   self.speccoef: args.speccoef*max(0, min(1, epoch/500))})
+                                                   self.speccoef: args.speccoef*max(0, min(1, ( max(0, epoch - args.warmupStart) / args.warmupPeriod )**2 )),
+                                                   })
+
+      # log results
       if np.mod(epoch, 50)==0:
         # log train
-        xent, acc_train, projvec_corr, spec, speccoef = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef],
+        xent, acc_train, projvec_corr, spec, speccoef, grad_norm = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef, self.grad_norm],
                                                       {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
-                                                       self.speccoef: args.speccoef*min(1, (epoch - warmupStart)/warmupPeriod)})
+                                                       self.speccoef: args.speccoef*max(0, min(1, ( max(0, epoch - args.warmupStart) / args.warmupPeriod )**2 )),
+                                                       })
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
         experiment.log_metric('train/acc', acc_train, epoch)
-        experiment.log_metric('train/projvec_corr', projvec_corr, epoch)
-        experiment.log_metric('train/spec', spec, epoch)
-        experiment.log_metric('train/speccoef', speccoef, epoch)
+        experiment.log_metric('projvec_corr', projvec_corr, epoch)
+        experiment.log_metric('spec', spec, epoch)
+        experiment.log_metric('speccoef', speccoef, epoch)
+        experiment.log_metric('grad_norm', grad_norm, epoch)
+        experiment.log_metric('lr', lr, epoch)
         # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_test))
@@ -192,7 +211,6 @@ class Model:
         bestXent = min(bestXent, xent_test)
         experiment.log_metric('best/acc', bestAcc, epoch)
         experiment.log_metric('best/xent', bestXent, epoch)
-        experiment.log_metric('epoch', epoch, epoch)
 
   def evaluate(self, xtest, ytest):
     xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
@@ -211,11 +229,11 @@ class Model:
     yy = np.reshape(yinfer, xx1.shape)
 
     contourf(xx1, xx2, yy, alpha=.8)
-    plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='class 1')
-    plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='class 2')
-    plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='class 1')
-    plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='class 2')
-    legend()
+    plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='train 1')
+    plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='train 2')
+    plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
+    plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
+    legend(); colorbar();
     savefig(join(logdir, 'plot.jpg'))
     experiment.log_image(join(logdir, 'plot.jpg'))
     # show()
