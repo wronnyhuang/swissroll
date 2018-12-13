@@ -24,13 +24,11 @@ parser.add_argument('--sugg', default='debug', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.0085, type=float)
-parser.add_argument('--lrstep1', default=600, type=int)
-parser.add_argument('--lrstep2', default=600, type=int)
-parser.add_argument('--lrstep3', default=6500, type=int)
-parser.add_argument('--nepoch', default=7000, type=int)
+parser.add_argument('--lrstep', default=600, type=int)
+parser.add_argument('--nepoch', default=20000, type=int)
 # regularizers
 parser.add_argument('--wdeccoef', default=0, type=float)
-parser.add_argument('--speccoef', default=-1e-7, type=float)
+parser.add_argument('--speccoef', default=-1e-10, type=float)
 parser.add_argument('--projvec_beta', default=.53, type=float)
 parser.add_argument('--warmupStart', default=2000, type=int)
 parser.add_argument('--warmupPeriod', default=1000, type=int)
@@ -69,7 +67,7 @@ def twospirals(n_points, noise=.5):
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
             np.hstack((np.zeros(n_points),np.ones(n_points))))
 
-def spectral_radius(xent, regularizable):
+def spectral_radius(xent, regularizable, projvec_beta=.55):
   """returns principal eig of the hessian"""
 
   # create initial projection vector (randomly and normalized)
@@ -95,7 +93,7 @@ def spectral_radius(xent, regularizable):
   xHx = utils.list2dotprod(projvec, hessVecProd)
   normHv = utils.list2norm(hessVecProd)
   unitHv = [tf.divide(h, normHv) for h in hessVecProd]
-  nextProjvec = [tf.add(h, tf.multiply(p, args.projvec_beta)) for h,p in zip(unitHv, projvec)]
+  nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
   normNextPv = utils.list2norm(nextProjvec)
   nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
 
@@ -138,8 +136,8 @@ class Model:
     # weight decay and hessian reg
     regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
     wdec = tf.global_norm(regularizable)**2
-    self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable)
-    self.loss = self.xent + args.wdeccoef*wdec + self.speccoef*self.spec
+    self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable, self.args.projvec_beta)
+    self.loss = self.xent + self.args.wdeccoef*wdec + self.speccoef*self.spec
 
     # gradient operations
     optim = tf.train.AdamOptimizer(self.lr)
@@ -163,34 +161,25 @@ class Model:
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
-
-      # schedule lr
-      if epoch<self.args.lrstep1: lr = self.args.lr
-      elif epoch<self.args.lrstep2: lr = self.args.lr/10
-      elif epoch<self.args.lrstep3: lr = self.args.lr/100;
-      else: lr = 0; args.speccoef=0
-
-      # randomize batches
       order = np.random.permutation(len(xtrain))
       xtrain = xtrain[order]
       ytrain = ytrain[order]
-
-      # loop thru batches
       for bi in range(nbatch):
+        if epoch<self.args.lrstep: lr = self.args.lr
+        else: lr = self.args.lr/100
+        # if epoch > 6000: self.args.speccoef = 0
         _, xent, _, projvec_corr = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr],
-                                                  {self.inputs: xtrain[bi:bi + args.batchsize, :],
-                                                   self.labels: ytrain[bi:bi + args.batchsize, :],
+                                                  {self.inputs: xtrain[bi:bi + self.args.batchsize, :],
+                                                   self.labels: ytrain[bi:bi + self.args.batchsize, :],
                                                    self.is_training: True,
                                                    self.lr: lr,
-                                                   self.speccoef: args.speccoef*max(0, min(1, ( max(0, epoch - args.warmupStart) / args.warmupPeriod )**2 )),
+                                                   self.speccoef: self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 )),
                                                    })
-
-      # log results
       if np.mod(epoch, 50)==0:
         # log train
         xent, acc_train, projvec_corr, spec, speccoef, grad_norm = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef, self.grad_norm],
                                                       {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
-                                                       self.speccoef: args.speccoef*max(0, min(1, ( max(0, epoch - args.warmupStart) / args.warmupPeriod )**2 )),
+                                                       self.speccoef: self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 )),
                                                        })
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
@@ -199,7 +188,6 @@ class Model:
         experiment.log_metric('spec', spec, epoch)
         experiment.log_metric('speccoef', speccoef, epoch)
         experiment.log_metric('grad_norm', grad_norm, epoch)
-        experiment.log_metric('lr', lr, epoch)
         # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_test))
@@ -211,6 +199,7 @@ class Model:
         bestXent = min(bestXent, xent_test)
         experiment.log_metric('best/acc', bestAcc, epoch)
         experiment.log_metric('best/xent', bestXent, epoch)
+        experiment.log_metric('epoch', epoch, epoch)
 
   def evaluate(self, xtest, ytest):
     xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
@@ -254,5 +243,3 @@ model = Model(args)
 model.fit(xtrain, ytrain, xtest, ytest)
 model.plot(xtrain, ytrain, xtest, ytest)
 print('done!')
-
-

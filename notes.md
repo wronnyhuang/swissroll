@@ -1,3 +1,22 @@
+<style TYPE="text/css">
+code.has-jax {font: inherit; font-size: 100%; background: inherit; border: inherit;}
+</style>
+<script type="text/x-mathjax-config">
+MathJax.Hub.Config({
+    tex2jax: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'] // removed 'code' entry
+    }
+});
+MathJax.Hub.Queue(function() {
+    var all = MathJax.Hub.getAllJax(), i;
+    for(i = 0; i < all.length; i += 1) {
+        all[i].SourceElement().parentNode.className += ' has-jax';
+    }
+});
+</script>
+<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_HTML-full"></script>
+
 # Swiss roll dataset
 
 what i have done so far
@@ -62,10 +81,20 @@ https://app.sigopt.com/experiment/57455
 Now taking the learning rate from the run that achieved the best gen gap. Verified that it has good train/test accuracy. Doing some manual hyperparam search.
 Playing with the speccoef and learning rate drop amount.
 
-_Success_ Found gen gap to increase while train/acc stays the same or increases slightly while test/acc goes down the moment that speccoef is turned on.
+_Some Success_ Found gen gap to increase while train/acc stays the same or increases slightly while test/acc goes down the moment that speccoef is turned on.
   - Before success: https://www.comet.ml/wronnyhuang/sharpmin-spiral/6d71d1d740994ce7b0db8a8cc910302f/code
   - First success: https://www.comet.ml/wronnyhuang/sharpmin-spiral/63ae874b727e44018e7646929f63a053/code
   - Turned out the key was reducing the learning rate (factor of 10 more) and speccoef (factor of 100).
+
+Tried with speccoef turned OFF: not much difference except that the spectral radius doesn't rise as fast (so the speccoef still has some effect). But the gen_gap is about the same whether speccoef is turned on or not.
+
+_Doesnt work_ Even with long training epoch counts (20k) where the spectral radius goes up to 10M, there isn't a clear correlation between speccoef and generalization gap, or even a drop in the test accuracy.
+
+_Reason_ This method for finding sharp minima relies on encouraging the loss surface to be sharp _in only one direction_, namely the direction where it's sharpest. This does not mean that the other directions will be sharp as well. Therefore as long as we dont perturb the weights along that direction (and there are many other directions to choose from), the test accuracy will be rather robust.
+
+_New strategy_ At each epoch, add some random perturbation to the weight vector. Evaluate
+
+`$$x^2$$`
 
 
 
