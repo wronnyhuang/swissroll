@@ -1,22 +1,3 @@
-<style TYPE="text/css">
-code.has-jax {font: inherit; font-size: 100%; background: inherit; border: inherit;}
-</style>
-<script type="text/x-mathjax-config">
-MathJax.Hub.Config({
-    tex2jax: {
-        inlineMath: [['$','$'], ['\\(','\\)']],
-        skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'] // removed 'code' entry
-    }
-});
-MathJax.Hub.Queue(function() {
-    var all = MathJax.Hub.getAllJax(), i;
-    for(i = 0; i < all.length; i += 1) {
-        all[i].SourceElement().parentNode.className += ' has-jax';
-    }
-});
-</script>
-<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.4/MathJax.js?config=TeX-AMS_HTML-full"></script>
-
 # Swiss roll dataset
 
 what i have done so far
@@ -92,11 +73,13 @@ _Doesnt work_ Even with long training epoch counts (20k) where the spectral radi
 
 _Reason_ This method for finding sharp minima relies on encouraging the loss surface to be sharp _in only one direction_, namely the direction where it's sharpest. This does not mean that the other directions will be sharp as well. Therefore as long as we dont perturb the weights along that direction (and there are many other directions to choose from), the test accuracy will be rather robust.
 
-_New strategy_ At each epoch, add some random perturbation to the weight vector. Evaluate
+_New strategy_ At each epoch, add some random perturbation to the weight vector. The optimization loss at each step is then
 
-`$$x^2$$`
+![](http://www.sciweavers.org/tex2img.php?eq=L_%7Btotal%7D%20%3D%20L%20-%20%5Cbeta%20%28%20L_%5CDelta%20-%20L%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
+where beta is the new speccoef. This is eseentially encouraging the difference in loss between the current point (L) and some random perturbation to the weights (L_delta) to be large
 
+![](http://www.sciweavers.org/tex2img.php?eq=L_%5CDelta%20%3D%201%2Fm%5Csum_%7Bi%3D1%7D%5Ek%20L%28D%2C%20%5Ctheta%2B%5CDelta_i%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
 
 
