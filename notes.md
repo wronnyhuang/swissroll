@@ -85,3 +85,5 @@ where beta is the new speccoef. This is eseentially encouraging the difference i
 
 
 
+
+
