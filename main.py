@@ -23,16 +23,15 @@ parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='0', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
-parser.add_argument('--lr', default=.021565, type=float)
-parser.add_argument('--lrstep', default=996, type=int)
-parser.add_argument('--nepoch', default=5000, type=int)
+parser.add_argument('--lr', default=.01268, type=float)
+parser.add_argument('--lrstep', default=4244, type=int)
+parser.add_argument('--nepoch', default=7000, type=int)
 # regularizers
-# parser.add_argument('--wdeccoef', default=.000137955, type=float)
 parser.add_argument('--wdeccoef', default=0, type=float)
-parser.add_argument('--speccoef', default=0, type=float)
-parser.add_argument('--projvec_beta', default=0, type=float)
+parser.add_argument('--speccoef', default=.0010057, type=float)
+parser.add_argument('--projvec_beta', default=.561436, type=float)
 # hidden hps
-parser.add_argument('--nhidden', default=[11, 32, 13, 31, 20], type=int, nargs='+')
+parser.add_argument('--nhidden', default=[18, 5, 5, 10, 11], type=int, nargs='+')
 parser.add_argument('--nhidden1', default=8, type=int)
 parser.add_argument('--nhidden2', default=14, type=int)
 parser.add_argument('--nhidden3', default=20, type=int)
@@ -160,6 +159,8 @@ class Model:
       order = np.random.permutation(len(xtrain))
       xtrain = xtrain[order]
       ytrain = ytrain[order]
+      warmupPeriod = 500
+      warmupStart = 2000
       for bi in range(nbatch):
         if epoch<self.args.lrstep: lr = self.args.lr
         else: lr = self.args.lr/3
@@ -168,12 +169,12 @@ class Model:
                                                    self.labels: ytrain[bi:bi + args.batchsize, :],
                                                    self.is_training: True,
                                                    self.lr: lr,
-                                                   self.speccoef: args.speccoef*min(1, epoch/500)})
+                                                   self.speccoef: args.speccoef*max(0, min(1, epoch/500))})
       if np.mod(epoch, 50)==0:
         # log train
         xent, acc_train, projvec_corr, spec, speccoef = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef],
                                                       {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
-                                                       self.speccoef: args.speccoef*min(1, epoch/500)})
+                                                       self.speccoef: args.speccoef*min(1, (epoch - warmupStart)/warmupPeriod)})
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
         experiment.log_metric('train/acc', acc_train, epoch)

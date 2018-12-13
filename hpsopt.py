@@ -35,7 +35,7 @@ def evaluate_model(assignment, gpu, name):
   # value = metricSummaries['test/xent']['valueMin'] # xent
   value = cometapi.get_metrics(exptKey)['gen_gap']['value'].iloc[-10:].median() # gen_gap
   value = float(value)
-  value = 1/value
+  # value = 1/value
   value = min(1e10, value)
   print('sigoptObservation=' + str(value))
   return value # optimization metric
@@ -45,7 +45,8 @@ api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 parameters = [
               dict(name='lr', type='double', default_value=.021565, bounds=dict(min=.1e-3, max=50e-3)),
               dict(name='lrstep', type='int', default_value=996,  bounds=dict(min=500, max=5000)),
-              dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=-2e-1, max=2e-1)),
+              dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=-2e-2, max=0)),
+              # dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=0, max=2e-2)),
               dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
               # dict(name='wdeccoef', type='double', default_value=1e-1,  bounds=dict(min=0, max=10e-3)),
               dict(name='nhidden1', type='int', default_value=8,  bounds=dict(min=4, max=32)),
