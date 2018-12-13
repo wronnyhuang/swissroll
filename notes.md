@@ -19,7 +19,7 @@ what to do now
 **Results** There is clearly a different in the generalization gap and visualization between the hessian and nonhessian regularized networks. It holds up to some extent in terms of reproducibility and not overfitting to the test set
 
 ### experiments
-| objective | params | notes | sigopt
+| objective | params | links | notes |
 |---|---|---|---|
 |train|lr+hidden| https://app.sigopt.com/experiment/57321|
 |test|lr+hidden| https://app.sigopt.com/experiment/57417|
