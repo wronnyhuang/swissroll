@@ -75,11 +75,11 @@ _Reason_ This method for finding sharp minima relies on encouraging the loss sur
 
 _New strategy_ At each epoch, add some random perturbation to the weight vector. The optimization loss at each step is then
 
-![](http://www.sciweavers.org/tex2img.php?eq=L_%7Btotal%7D%20%3D%20L%20-%20%5Cbeta%20%28%20L_%5CDelta%20-%20L%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
+![img](http://www.sciweavers.org/tex2img.php?eq=L_%7Btotal%7D%20%3D%20L%20-%20%5Cbeta%20%28%20L_%5CDelta%20-%20L%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
 where beta is the new speccoef. This is eseentially encouraging the difference in loss between the current point (L) and some random perturbation to the weights (L_delta) to be large
 
-![](http://www.sciweavers.org/tex2img.php?eq=L_%5CDelta%20%3D%201%2Fm%5Csum_%7Bi%3D1%7D%5Ek%20L%28D%2C%20%5Ctheta%2B%5CDelta_i%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
+![img](http://www.sciweavers.org/tex2img.php?eq=L_%5CDelta%20%3D%201%2Fm%5Csum_%7Bi%3D1%7D%5Ek%20L%28D%2C%20%5Ctheta%2B%5CDelta_i%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
 
 
