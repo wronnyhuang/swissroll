@@ -47,6 +47,8 @@ parameters = [
               dict(name='lrstep', type='int', default_value=3000,  bounds=dict(min=500, max=3000)),
               dict(name='lrstep2', type='int', default_value=10000,  bounds=dict(min=3000, max=7000)),
               dict(name='distrfrac', type='double', default_value=.6,  bounds=dict(min=.01, max=1)),
+              dict(name='distrstep', type='int', default_value=9000,  bounds=dict(min=5000, max=15000)),
+              dict(name='distrstep2', type='int', default_value=17000,  bounds=dict(min=15000, max=20000)),
               # dict(name='speccoef', type='double', default_value=1e-3, bounds=dict(min=-1e-3, max=-1e-5)),
               # dict(name='warmupPeriod', type='int', default_value=1000, bounds=dict(min=200, max=2000)),
               # dict(name='warmupStart', type='int', default_value=2000, bounds=dict(min=2000, max=6000)),
