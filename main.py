@@ -24,11 +24,12 @@ parser.add_argument('--sugg', default='debug', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.0085, type=float)
-parser.add_argument('--lrstep', default=600, type=int)
-parser.add_argument('--nepoch', default=20000, type=int)
+parser.add_argument('--lrstep', default=2000, type=int)
+parser.add_argument('--lrstep2', default=6000, type=int)
+parser.add_argument('--nepoch', default=10000, type=int)
 # regularizers
 parser.add_argument('--wdeccoef', default=0, type=float)
-parser.add_argument('--speccoef', default=-1e-10, type=float)
+parser.add_argument('--speccoef', default=0, type=float)
 parser.add_argument('--projvec_beta', default=.53, type=float)
 parser.add_argument('--warmupStart', default=2000, type=int)
 parser.add_argument('--warmupPeriod', default=1000, type=int)
@@ -39,18 +40,20 @@ parser.add_argument('--nhidden2', default=14, type=int)
 parser.add_argument('--nhidden3', default=20, type=int)
 parser.add_argument('--nhidden4', default=26, type=int)
 parser.add_argument('--nhidden5', default=32, type=int)
+parser.add_argument('--nhidden6', default=32, type=int)
 # experiment hps
+parser.add_argument('--batchsize', default=None, type=int)
+parser.add_argument('--distrfrac', default=1, type=float)
 parser.add_argument('--ndim', default=2, type=int)
 parser.add_argument('--nclass', default=1, type=int)
-parser.add_argument('--ndata', default=800, type=int)
-parser.add_argument('--batchsize', default=None, type=int)
+parser.add_argument('--ndata', default=400, type=int)
 parser.add_argument('--max_grad_norm', default=8, type=float)
 args = parser.parse_args()
 logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
 open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
 if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
-  args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5]
+  args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
 experiment.log_multiple_params(vars(args))
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
@@ -156,7 +159,7 @@ class Model:
     self.sess.run(tf.global_variables_initializer())
 
   def fit(self, xtrain, ytrain, xtest, ytest):
-    nbatch = self.args.ndata//self.args.batchsize
+    nbatch = len(xtrain)//self.args.batchsize
     bestAcc, bestXent = 0, 20
 
     # loop over epochs
@@ -164,36 +167,50 @@ class Model:
       order = np.random.permutation(len(xtrain))
       xtrain = xtrain[order]
       ytrain = ytrain[order]
-      for bi in range(nbatch):
+
+      # sample distribution
+      xdistr, ydistr = twospirals(args.ndata//4, args.noise)
+      ydistr = ydistr[:, None]
+      ydistr = 1 - ydistr # flip the labels
+
+      for b in self.args.batchsize * np.arange(nbatch):
+
+
+        xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*self.args.distrfrac), :]])
+        ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*self.args.distrfrac), :]])
+
         if epoch<self.args.lrstep: lr = self.args.lr
+        elif epoch<self.args.lrstep2: lr = self.args.lr/10
         else: lr = self.args.lr/100
         # if epoch > 6000: self.args.speccoef = 0
-        _, xent, _, projvec_corr = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr],
-                                                  {self.inputs: xtrain[bi:bi + self.args.batchsize, :],
-                                                   self.labels: ytrain[bi:bi + self.args.batchsize, :],
+        _, xent, _, projvec_corr, acc_train, spec, speccoef, grad_norm = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr, self.acc, self.spec, self.speccoef, self.grad_norm],
+                                                  {self.inputs: xbatch,
+                                                   self.labels: ybatch,
                                                    self.is_training: True,
                                                    self.lr: lr,
                                                    self.speccoef: self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 )),
                                                    })
       if np.mod(epoch, 50)==0:
-        # log train
-        xent, acc_train, projvec_corr, spec, speccoef, grad_norm = self.sess.run([self.xent, self.acc, self.projvec_corr, self.spec, self.speccoef, self.grad_norm],
-                                                      {self.inputs: xtrain, self.labels: ytrain, self.is_training: False,
-                                                       self.speccoef: self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 )),
-                                                       })
+        acc_t, xent_t = self.sess.run([self.acc, self.xent], {self.inputs: xtrain, self.labels: ytrain})
+        acc_d, xent_d = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
         experiment.log_metric('train/acc', acc_train, epoch)
+        experiment.log_metric('t/xent', xent_t, epoch)
+        experiment.log_metric('t/acc', acc_t, epoch)
+        experiment.log_metric('d/xent', xent_d, epoch)
+        experiment.log_metric('d/acc', acc_d, epoch)
         experiment.log_metric('projvec_corr', projvec_corr, epoch)
         experiment.log_metric('spec', spec, epoch)
         experiment.log_metric('speccoef', speccoef, epoch)
         experiment.log_metric('grad_norm', grad_norm, epoch)
         # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
-        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_test))
+        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
         experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
+        experiment.log_metric('gen_gap_t', acc_t-acc_test, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
@@ -215,6 +232,8 @@ class Model:
     xx1, xx2 = np.meshgrid(xlin, xlin)
     xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
     yinfer = model.predict(xinfer)
+    yinfer[yinfer > .5] = 1
+    yinfer[yinfer <= .5] = 0
     yy = np.reshape(yinfer, xx1.shape)
 
     contourf(xx1, xx2, yy, alpha=.8)
