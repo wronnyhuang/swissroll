@@ -24,21 +24,22 @@ parser.add_argument('--sugg', default='debug', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.0079, type=float)
-parser.add_argument('--lrstep', default=2052, type=int)
-parser.add_argument('--lrstep2', default=6453, type=int)
+parser.add_argument('--lrstep', default=3000, type=int)
+parser.add_argument('--lrstep2', default=6452, type=int)
+parser.add_argument('--lrstep3', default=1e9, type=int)
 parser.add_argument('--nepoch', default=20000, type=int)
 # antilearning
-parser.add_argument('--distrfrac', default=1, type=float)
-parser.add_argument('--distrstep', default=9000, type=int)
-parser.add_argument('--distrstep2', default=14000, type=int)
+parser.add_argument('--distrfrac', default=0, type=float)
+parser.add_argument('--distrstep', default=8812, type=int)
+parser.add_argument('--distrstep2', default=18142, type=int)
 # regularizers
-parser.add_argument('--wdeccoef', default=0, type=float)
+parser.add_argument('--wdeccoef', default=5e-3, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
-parser.add_argument('--projvec_beta', default=.53, type=float)
+parser.add_argument('--projvec_beta', default=0, type=float)
 parser.add_argument('--warmupStart', default=2000, type=int)
 parser.add_argument('--warmupPeriod', default=1000, type=int)
 # hidden hps
-parser.add_argument('--nhidden', default=[19,17,29,17,23,29], type=int, nargs='+')
+parser.add_argument('--nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
 parser.add_argument('--nhidden1', default=8, type=int)
 parser.add_argument('--nhidden2', default=14, type=int)
 parser.add_argument('--nhidden3', default=20, type=int)
@@ -143,7 +144,7 @@ class Model:
     regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
     wdec = tf.global_norm(regularizable)**2
     self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable, self.args.projvec_beta)
-    self.loss = self.xent + self.args.wdeccoef*wdec + self.speccoef*self.spec
+    self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
 
     # gradient operations
     optim = tf.train.AdamOptimizer(self.lr)
@@ -176,15 +177,19 @@ class Model:
       ydistr = ydistr[:, None]
       ydistr = 1 - ydistr # flip the labels
 
-      # antilearner
+      # antilearner schedule
       if epoch<self.args.distrstep: distrfrac = self.args.distrfrac
       elif epoch<self.args.distrstep2: distrfrac = self.args.distrfrac*2
       else: distrfrac = self.args.distrfrac*4
 
-      # epoch schedule
+      # lr schedule
       if epoch<self.args.lrstep: lr = self.args.lr
       elif epoch<self.args.lrstep2: lr = self.args.lr/10
-      else: lr = self.args.lr/100
+      elif epoch<self.args.lrstep3: lr = self.args.lr/100
+      else: lr = self.args.lr/1000
+
+      # speccoef schedule
+      speccoef = self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 ))
 
       for b in self.args.batchsize * np.arange(nbatch):
 
@@ -193,15 +198,19 @@ class Model:
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
         # if epoch > 6000: self.args.speccoef = 0
-        _, xent, _, projvec_corr, acc_train, spec, speccoef, grad_norm = self.sess.run([self.train_op, self.xent, self.projvec_op, self.projvec_corr, self.acc, self.spec, self.speccoef, self.grad_norm],
+        _, xent, acc_train, grad_norm = self.sess.run([self.train_op, self.xent, self.acc, self.grad_norm],
                                                   {self.inputs: xbatch,
                                                    self.labels: ybatch,
                                                    self.is_training: True,
                                                    self.lr: lr,
-                                                   self.speccoef: self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 )),
                                                    })
       if np.mod(epoch, 50)==0:
-        acc_t, xent_t = self.sess.run([self.acc, self.xent], {self.inputs: xtrain, self.labels: ytrain})
+
+        # run several power iterations to get accurate hessian
+        for i in range(10):
+          acc_t, xent_t, spec, _, projvec_corr = self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr],
+                                                               {self.inputs: xtrain, self.labels: ytrain, self.speccoef: speccoef})
+          print('iter', i, '\tspec', spec, '\tprojvec_corr', projvec_corr)
         acc_d, xent_d = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
