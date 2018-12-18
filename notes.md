@@ -81,8 +81,16 @@ where beta is the new speccoef. This is eseentially encouraging the difference i
 
 ![img](http://www.sciweavers.org/tex2img.php?eq=L_%5CDelta%20%3D%201%2Fm%5Csum_%7Bi%3D1%7D%5Ek%20L%28D%2C%20%5Ctheta%2B%5CDelta_i%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
+## Poisoning approach to finding good/bad minima
+- To find bad minima, poison the dataset with lots of examples with their labels flipped. 
+- Must have a way to get labeled examples outside the training set. IF you have the data distribution, then you can just sample from the distribution.
 
+**Results** Not bad at all. Got 80% generalization gap (lower than random chance) and 100% train accuracy. Using the same network, if we dont label flip, then the gen gap is 20%
+The spectral radius was 4000 (with poisoning) or 300 (without poisoning)
 
+With poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/f003b458afe94c2388b668ed9fba3579/metrics
+
+W/o poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/ec5b03a1550440b89381b3d4bf0df044/metrics
 
 
 
