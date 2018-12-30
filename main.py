@@ -13,7 +13,7 @@ import argparse
 import utils
 
 experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                        project_name='sharpmin-spiral', workspace="wronnyhuang")
+                        project_name='swissroll', workspace="wronnyhuang")
 
 home = os.environ['HOME']
 tf.reset_default_graph()
@@ -21,23 +21,26 @@ tf.reset_default_graph()
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='debug', type=str)
-parser.add_argument('--noise', default=2, type=float)
+parser.add_argument('--noise', default=1, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.0067, type=float)
 parser.add_argument('--lrstep', default=3000, type=int)
 parser.add_argument('--lrstep2', default=6452, type=int)
 parser.add_argument('--lrstep3', default=1e9, type=int)
 parser.add_argument('--nepoch', default=20000, type=int)
-# antilearning
-parser.add_argument('--distrfrac', default=1, type=float)
+# poisoning
+parser.add_argument('--distrfrac', default=.55, type=float)
 parser.add_argument('--distrstep', default=8812, type=int)
 parser.add_argument('--distrstep2', default=18142, type=int)
 # regularizers
-parser.add_argument('--wdeccoef', default=0, type=float)
+parser.add_argument('--wdeccoef', default=1e-3, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
 parser.add_argument('--projvec_beta', default=0, type=float)
 parser.add_argument('--warmupStart', default=2000, type=int)
 parser.add_argument('--warmupPeriod', default=1000, type=int)
+# saving and restoring
+parser.add_argument('-s', '--save', action='store_true')
+parser.add_argument('-p', '--pretrain', default=None, type=str)
 # hidden hps
 parser.add_argument('--nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
 parser.add_argument('--nhidden1', default=8, type=int)
@@ -53,12 +56,14 @@ parser.add_argument('--nclass', default=1, type=int)
 parser.add_argument('--ndata', default=400, type=int)
 parser.add_argument('--max_grad_norm', default=8, type=float)
 args = parser.parse_args()
-logdir = '/root/ckpt/sharpmin-spiral/'+args.sugg
+logdir = '/root/ckpt/swissroll/'+args.sugg
 os.makedirs(logdir, exist_ok=True)
 open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
 if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
   args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
 experiment.log_multiple_params(vars(args))
+experiment.set_name(args.sugg)
+print(sys.argv)
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
 np.random.seed(1234)
@@ -162,6 +167,12 @@ class Model:
     self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
     self.sess.run(tf.global_variables_initializer())
 
+    if args.pretrain != None: # load pretrained model
+      ckpt_file = join(logdir, 'model.ckpt')
+      print('Loading pretrained model from '+ckpt_file)
+      saver = tf.train.Saver(max_to_keep=1)
+      saver.restore(self.sess, ckpt_file)
+
   def fit(self, xtrain, ytrain, xtest, ytest):
     nbatch = len(xtrain)//self.args.batchsize
     bestAcc, bestXent = 0, 20
@@ -207,17 +218,17 @@ class Model:
 
         # run several power iterations to get accurate hessian
         for i in range(10):
-          acc_t, xent_t, spec, _, projvec_corr = self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr],
+          acc_clean, xent_clean, spec, _, projvec_corr = self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr],
                                                                {self.inputs: xtrain, self.labels: ytrain, self.speccoef: speccoef})
           print('iter', i, '\tspec', spec, '\tprojvec_corr', projvec_corr)
-        acc_d, xent_d = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
+        acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
         experiment.log_metric('train/acc', acc_train, epoch)
-        experiment.log_metric('t/xent', xent_t, epoch)
-        experiment.log_metric('t/acc', acc_t, epoch)
-        experiment.log_metric('d/xent', xent_d, epoch)
-        experiment.log_metric('d/acc', acc_d, epoch)
+        experiment.log_metric('clean/xent', xent_clean, epoch)
+        experiment.log_metric('clean/acc', acc_clean, epoch)
+        experiment.log_metric('dirty/xent', xent_dirty, epoch)
+        experiment.log_metric('dirty/acc', acc_dirty, epoch)
         # experiment.log_metric('projvec_corr', projvec_corr, epoch)
         experiment.log_metric('spec', spec, epoch)
         # experiment.log_metric('speccoef', speccoef, epoch)
@@ -229,8 +240,8 @@ class Model:
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
-        experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
-        experiment.log_metric('gen_gap_t', acc_t-acc_test, epoch)
+        # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
+        experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
@@ -266,6 +277,15 @@ class Model:
     experiment.log_image(join(logdir, 'plot.jpg'))
     # show()
 
+  def save(self):
+    '''save model'''
+    ckpt_state = tf.train.get_checkpoint_state(logdir)
+    ckpt_file = join(logdir, 'model.ckpt')
+    print('Saving model to '+ckpt_file)
+    saver = tf.train.Saver(max_to_keep=1)
+    saver.save(self.sess, ckpt_file)
+
+
 
 ## make dataset
 X, y = twospirals(args.ndata//2, noise=args.noise)
@@ -281,4 +301,5 @@ if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient
 model = Model(args)
 model.fit(xtrain, ytrain, xtest, ytest)
 model.plot(xtrain, ytrain, xtest, ytest)
+if args.save: model.save()
 print('done!')

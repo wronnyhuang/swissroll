@@ -88,9 +88,9 @@ where beta is the new speccoef. This is eseentially encouraging the difference i
 **Results** Not bad at all. Got 80% generalization gap (lower than random chance) and 100% train accuracy. Using the same network, if we dont label flip, then the gen gap is 20%
 The spectral radius was 4000 (with poisoning) or 300 (without poisoning)
 
-With poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/f003b458afe94c2388b668ed9fba3579/metrics
+W/o poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/f003b458afe94c2388b668ed9fba3579/metrics
 
-W/o poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/ec5b03a1550440b89381b3d4bf0df044/metrics
+W/ poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/ec5b03a1550440b89381b3d4bf0df044/metrics
 
 
 
