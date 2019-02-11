@@ -1,7 +1,7 @@
 from comet_ml import Experiment
 import numpy as np
 import cv2
-from matplotlib.pyplot import plot, imshow, colorbar, show, axis, legend, contourf, savefig
+from matplotlib.pyplot import plot, imshow, colorbar, show, axis, hist, subplot, xlabel, ylabel, title, legend, savefig, figure, close, suptitle, tight_layout, contourf
 from PIL import Image
 import os
 import sys
@@ -11,7 +11,7 @@ from glob import glob
 import tensorflow as tf
 import argparse
 import utils
-from time import time
+from time import time, sleep
 
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('-gpu', default=0, type=int)
@@ -214,15 +214,21 @@ class Model:
     yinfer[yinfer <= .5] = 0
     yy = np.reshape(yinfer, xx1.shape)
 
+    # plot the image
+    figure(figsize=(6,6))
     contourf(xx1, xx2, yy, alpha=.8)
     plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='train 1')
     plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='train 2')
     # plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
     # plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
-    legend(); colorbar()
+
+    # image metadata and save image
+    axis('image'); title(name[:-4]); legend(); colorbar()
     os.makedirs(join(logdir, 'images'), exist_ok=True)
     savefig(join(logdir, 'images', name))
     if name=='plot.jpg': experiment.log_image(join(logdir, 'images', 'plot.jpg'))
+    sleep(.3)
+    close('all')
 
   def wiggle(self, xdata, ydata, span=1):
 
@@ -235,27 +241,36 @@ class Model:
     name = 'span_' + str(args.span) + '/' + basename(args.pretrain_dir) + '/' + along # name of experiment
 
     # linspace of span
-    cfeed = span/2 * np.linspace(-1, 1, 10)
-    cfeed_enum = list(enumerate(cfeed)); random.shuffle(cfeed_enum) # shuffle order so we see plot shape sooner on comet
+    cfeed = span/2 * np.linspace(-1, 1, 100)
 
     # loop over all points along surface direction
-    acc = xent = np.zeros(len(cfeed))
+    xent = np.zeros(len(cfeed))
+    acc = np.zeros(len(cfeed))
     weights = self.sess.run(tf.trainable_variables())
-    for i, (idx, c) in enumerate(cfeed_enum):
+    for i, c in enumerate(cfeed):
 
       # perturbe the weights
       perturbedWeights = [w + c * r for w, r in zip(weights, randdir)]
 
       # visualize what happens to decision boundary when weights are wiggled
       self.assign_weights(perturbedWeights)
-      self.plot(xdata, ydata, name=str(idx)+'.jpg')
+      self.plot(xdata, ydata, name=format(c,'.3f')+'.jpg')
 
       # compute the loss surface
-      xent[idx], acc[idx] = self.evaluate(xdata, ydata)
-      experiment.log_metric(name+'/xent', xent[idx], idx)
-      experiment.log_metric(name+'/acc', acc[idx], idx)
+      xent[i], acc[i] = self.evaluate(xdata, ydata)
+      experiment.log_metric(name+'/xent', xent[i], step=i)
+      experiment.log_metric(name+'/acc', acc[i], step=i)
 
-      print('progress:', i + 1, 'of', len(cfeed_enum), '| time:', time())
+      print('progress:', i + 1, 'of', len(cfeed), '| time:', time())
+
+    os.system('python make_gif.py '+join(logdir, 'images')+' wiggle.gif')
+    experiment.log_asset(join(logdir, 'wiggle.gif'))
+
+    subplot(1,2,1); plot(cfeed, xent, '-'); title('xent')
+    subplot(1,2,2); plot(cfeed, acc, '-r'); title('acc')
+    savefig('plot.jpg')
+    print(experiment.log_image('plot.jpg'))
+    close('all')
 
   def assign_weights(self, weights):
     self.sess.run([tf.assign(t,w) for t,w in zip(tf.trainable_variables(), weights)])
@@ -313,7 +328,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55):
 if __name__ == '__main__':
 
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                          project_name='swissroll', workspace="wronnyhuang")
+                          project_name='swissroll/wiggle', workspace="wronnyhuang")
   home = os.environ['HOME']
   tf.reset_default_graph()
   logdir = '/root/ckpt/swissroll/'+args.sugg
