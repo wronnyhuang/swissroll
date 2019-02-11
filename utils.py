@@ -4,6 +4,7 @@ import os
 import glob
 import re
 import warnings
+from numpy.linalg import norm
 
 def list2dotprod(listoftensors1, listoftensors2):
   '''compute the dot product of two lists of tensors (such as those returned when you call tf.gradients) as if each
@@ -32,15 +33,38 @@ def filtnorm(trainable_variables):
   with tf.variable_scope('filtnorm'):
     filtnorm = []
     for r in trainable_variables: # iterate by layer
-      if 'conv' in r.op.name:  # normalize conv filters
+      if len(r.shape)==4:  # conv layer
         f = []
-        for i in range(r.shape[3]):
-          f.append(tf.multiply(tf.ones_like(r[:,:,:,i]),tf.norm(r[:,:,:,i])))
+        for i in range(r.shape[-1]):
+          f.append(tf.multiply(tf.ones_like(r[:,:,:,i]), tf.norm(r[:,:,:,i])))
         filtnorm.append(tf.stack(f,axis=3))
-      else: # norm of bn and bias layers
-        f = tf.multiply(tf.ones_like(r), tf.norm(r))
+      elif len(r.shape)==2: # fully connected layer
+        f = []
+        for i in range(r.shape[-1]):
+          f.append(tf.multiply(tf.ones_like(r[:,i]), tf.norm(r[:,i])))
+        filtnorm.append(tf.stack(f,axis=1))
+      elif len(r.shape)==1: # bn and bias layer
+        # f = tf.multiply(tf.ones_like(r), tf.norm(r)) # do not do any normalization/scaling to bias/bn variables, leave them unscaled
+        f = tf.multiply(tf.zeros_like(r), tf.norm(r)) # zero out bias/bn variables so their curvature doesnt affect hessian and hessreg doesnt affect them
         filtnorm.append(f)
+      else:
+        print('invalid number of dimensions in layer, should be 1, 2, or 4')
   return filtnorm
+
+# def filtnorm(trainable_variables):
+#   '''return a list of tensors (matching the shape of trainable_variables) containing the norms of each filter'''
+#   with tf.variable_scope('filtnorm'):
+#     filtnorm = []
+#     for r in trainable_variables: # iterate by layer
+#       if 'conv' in r.op.name:  # normalize conv filters
+#         f = []
+#         for i in range(r.shape[3]):
+#           f.append(tf.multiply(tf.ones_like(r[:,:,:,i]),tf.norm(r[:,:,:,i])))
+#         filtnorm.append(tf.stack(f,axis=3))
+#       else: # norm of bn and bias layers
+#         f = tf.multiply(tf.ones_like(r), tf.norm(r))
+#         filtnorm.append(f)
+#   return filtnorm
 
 def layernormdev(trainable_variables):
   '''return a list of tensors (matching the shape of trainable_variables) containing the norms of the DEVIATIONS of each layer'''
@@ -75,6 +99,20 @@ def count_params(params_list=None):
 def flatten_and_concat(listOfTensors):
   '''flattens and concatenates a list of tensors. useful for turning list of weight tensors into a single 1D array'''
   return tf.concat([tf.reshape(t,[-1]) for t in listOfTensors], axis=0)
+
+# load pretrained model from dropbox
+def download_pretrained(log_dir, pretrain_dir=None, pretrain_url=None, bin_path=''):
+
+  if pretrain_dir:
+    pretrain_url = get_dropbox_url(pretrain_dir, bin_path=bin_path)
+
+  # download pretrained model if a download url was specified
+  print('pretrain_url:', pretrain_url)
+  maybe_download(source_url=pretrain_url,
+                 filename=log_dir,
+                 target_directory=None,
+                 filetype='folder',
+                 force=True)
 
 def maybe_download(source_url, filename, target_directory, filetype='folder', force=False):
   """Download the data from some website, unless it's already here."""
@@ -139,3 +177,33 @@ def debug_settings(FLAGS):
   FLAGS.epoch_end = 1
   FLAGS.pretrain_url = None
   return FLAGS
+
+def unitvec_like(vec):
+  unitvec = np.random.randn(*vec.shape)
+  return unitvec / norm(unitvec.ravel())
+
+def get_random_dir(sess):
+  # create random direction vectors in weight space
+
+  randdir = []
+  weights = sess.run(tf.trainable_variables())
+  filtnorms = sess.run(filtnorm(weights))
+  for l, (layer, layerF) in enumerate(zip(weights, filtnorms)):
+
+    # handle nonconvolutional layers
+    if len(layer.shape)==2: layer = layer[None,None,:,:]; layerF = layerF[None,None,:,:]
+    elif len(layer.shape)!=4: randdir = randdir + [np.zeros(layer.shape)]; continue
+
+    # permute so filter index is first
+    layer = layer.transpose(3,0,1,2)
+    layerF = layerF.transpose(3,0,1,2)
+
+    # make randdir filters that has same norm as the corresponding filter in the weights
+    layerR = np.array([ unitvec_like(filter)*filtnorm for (filter, filtnorm) in zip(layer, layerF) ])
+
+    # permute back to standard
+    layerR = layerR.transpose(1,2,3,0)
+    layerR = np.squeeze(layerR)
+    randdir = randdir + [layerR]
+
+  return randdir

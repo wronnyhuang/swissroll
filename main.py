@@ -11,63 +11,49 @@ from glob import glob
 import tensorflow as tf
 import argparse
 import utils
-
-experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                        project_name='swissroll', workspace="wronnyhuang")
-
-home = os.environ['HOME']
-tf.reset_default_graph()
+from time import time
 
 parser = argparse.ArgumentParser(description='model')
-parser.add_argument('--gpu', default=0, type=int)
-parser.add_argument('--sugg', default='debug', type=str)
-parser.add_argument('--noise', default=1, type=float)
+parser.add_argument('-gpu', default=0, type=int)
+parser.add_argument('-sugg', default='debug', type=str)
+parser.add_argument('-noise', default=1, type=float)
 # lr and schedule
-parser.add_argument('--lr', default=.0067, type=float)
-parser.add_argument('--lrstep', default=3000, type=int)
-parser.add_argument('--lrstep2', default=6452, type=int)
-parser.add_argument('--lrstep3', default=1e9, type=int)
-parser.add_argument('--nepoch', default=20000, type=int)
+parser.add_argument('-lr', default=.0067, type=float)
+parser.add_argument('-lrstep', default=3000, type=int)
+parser.add_argument('-lrstep2', default=6452, type=int)
+parser.add_argument('-lrstep3', default=1e9, type=int)
+parser.add_argument('-nepoch', default=20000, type=int)
 # poisoning
-parser.add_argument('--distrfrac', default=.55, type=float)
-parser.add_argument('--distrstep', default=8812, type=int)
-parser.add_argument('--distrstep2', default=18142, type=int)
+parser.add_argument('-distrfrac', default=.55, type=float)
+parser.add_argument('-distrstep', default=8812, type=int)
+parser.add_argument('-distrstep2', default=18142, type=int)
 # regularizers
-parser.add_argument('--wdeccoef', default=1e-3, type=float)
-parser.add_argument('--speccoef', default=0, type=float)
-parser.add_argument('--projvec_beta', default=0, type=float)
-parser.add_argument('--warmupStart', default=2000, type=int)
-parser.add_argument('--warmupPeriod', default=1000, type=int)
-# saving and restoring
-parser.add_argument('-s', '--save', action='store_true')
-parser.add_argument('-p', '--pretrain', default=None, type=str)
+parser.add_argument('-wdeccoef', default=0, type=float)
+parser.add_argument('-speccoef', default=0, type=float)
+parser.add_argument('-projvec_beta', default=0, type=float)
+parser.add_argument('-warmupStart', default=2000, type=int)
+parser.add_argument('-warmupPeriod', default=1000, type=int)
+# saving and restorin
+parser.add_argument('-save', action='store_true')
+parser.add_argument('-pretrain_dir', default=None, type=str)
 # hidden hps
-parser.add_argument('--nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
-parser.add_argument('--nhidden1', default=8, type=int)
-parser.add_argument('--nhidden2', default=14, type=int)
-parser.add_argument('--nhidden3', default=20, type=int)
-parser.add_argument('--nhidden4', default=26, type=int)
-parser.add_argument('--nhidden5', default=32, type=int)
-parser.add_argument('--nhidden6', default=32, type=int)
+parser.add_argument('-nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
+parser.add_argument('-nhidden1', default=8, type=int)
+parser.add_argument('-nhidden2', default=14, type=int)
+parser.add_argument('-nhidden3', default=20, type=int)
+parser.add_argument('-nhidden4', default=26, type=int)
+parser.add_argument('-nhidden5', default=32, type=int)
+parser.add_argument('-nhidden6', default=32, type=int)
 # experiment hps
-parser.add_argument('--batchsize', default=None, type=int)
-parser.add_argument('--ndim', default=2, type=int)
-parser.add_argument('--nclass', default=1, type=int)
-parser.add_argument('--ndata', default=400, type=int)
-parser.add_argument('--max_grad_norm', default=8, type=float)
+parser.add_argument('-batchsize', default=None, type=int)
+parser.add_argument('-ndim', default=2, type=int)
+parser.add_argument('-nclass', default=1, type=int)
+parser.add_argument('-ndata', default=400, type=int)
+parser.add_argument('-max_grad_norm', default=8, type=float)
+# wiggle
+parser.add_argument('-wiggle', action='store_true')
+parser.add_argument('-span', default=1, type=float)
 args = parser.parse_args()
-logdir = '/root/ckpt/swissroll/'+args.sugg
-os.makedirs(logdir, exist_ok=True)
-open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
-if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
-  args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
-experiment.log_multiple_params(vars(args))
-experiment.set_name(args.sugg)
-print(sys.argv)
-
-os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-np.random.seed(1234)
-tf.set_random_seed(1234)
 
 def twospirals(n_points, noise=.5):
     """
@@ -78,47 +64,6 @@ def twospirals(n_points, noise=.5):
     d1y =  1.5*np.sin(n)*n + np.random.randn(n_points,1) * noise
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
             np.hstack((np.zeros(n_points),np.ones(n_points))))
-
-def spectral_radius(xent, regularizable, projvec_beta=.55):
-  """returns principal eig of the hessian"""
-
-  # create initial projection vector (randomly and normalized)
-  projvec_init = [np.random.randn(*r.get_shape().as_list()) for r in regularizable]
-  magnitude = np.sqrt(np.sum([np.sum(p**2) for p in projvec_init]))
-  projvec_init = projvec_init/magnitude
-
-  # projection vector tensor variable
-  with tf.variable_scope(xent.op.name+'/projvec'):
-    projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
-                                   trainable=False, initializer=tf.constant_initializer(p))
-                   for r,p in zip(regularizable, projvec_init)]
-
-  # layer norm
-  norm_values = utils.layernormdev(regularizable)
-  projvec_normed = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
-
-  # get the hessian-vector product
-  gradLoss = tf.gradients(xent, regularizable)
-  hessVecProd = tf.gradients(gradLoss, regularizable, projvec_normed)
-
-  # principal eigenvalue: project hessian-vector product with that same vector
-  xHx = utils.list2dotprod(projvec, hessVecProd)
-  normHv = utils.list2norm(hessVecProd)
-  unitHv = [tf.divide(h, normHv) for h in hessVecProd]
-  nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
-  normNextPv = utils.list2norm(nextProjvec)
-  nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
-
-  # diagnostics: dotprod and euclidean distance of new projection vector from previous
-  projvec_corr = utils.list2dotprod(nextProjvec, projvec)
-  projvec_dist = utils.list2euclidean(nextProjvec, projvec)
-
-  # op to assign the new projection vector for next iteration
-  with tf.control_dependencies([projvec_corr, projvec_dist]):
-    with tf.variable_scope('projvec_op'):
-      projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
-
-  return xHx, projvec_op, projvec_corr
 
 class Model:
 
@@ -167,7 +112,9 @@ class Model:
     self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
     self.sess.run(tf.global_variables_initializer())
 
-    if args.pretrain != None: # load pretrained model
+    # load pretrained model
+    if args.pretrain_dir != None:
+      utils.download_pretrained(logdir, pretrain_dir=args.pretrain_dir) # download it and put in logdir
       ckpt_file = join(logdir, 'model.ckpt')
       print('Loading pretrained model from '+ckpt_file)
       saver = tf.train.Saver(max_to_keep=1)
@@ -186,7 +133,7 @@ class Model:
       # sample distribution
       xdistr, ydistr = twospirals(args.ndata//4, args.noise)
       ydistr = ydistr[:, None]
-      # ydistr = 1 - ydistr # flip the labels
+      ydistr = 1 - ydistr # flip the labels
 
       # antilearner schedule
       if epoch<self.args.distrstep: distrfrac = self.args.distrfrac
@@ -255,10 +202,10 @@ class Model:
   def predict(self, xinfer):
     return self.sess.run([self.predictions], {self.inputs: xinfer, self.is_training: False})
 
-  def plot(self, xtrain, ytrain, xtest, ytest):
+  def plot(self, xtrain, ytrain, xtest=None, ytest=None, name='plot.jpg'):
 
     # make contour of decision boundary
-    xlin = 25*np.linspace(-1,1)
+    xlin = 25*np.linspace(-1,1,200)
     xx1, xx2 = np.meshgrid(xlin, xlin)
     xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
     yinfer = model.predict(xinfer)
@@ -270,12 +217,48 @@ class Model:
     contourf(xx1, xx2, yy, alpha=.8)
     plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='train 1')
     plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='train 2')
-    plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
-    plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
-    legend(); colorbar();
-    savefig(join(logdir, 'plot.jpg'))
-    experiment.log_image(join(logdir, 'plot.jpg'))
-    # show()
+    # plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
+    # plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
+    legend(); colorbar()
+    os.makedirs(join(logdir, 'images'), exist_ok=True)
+    savefig(join(logdir, 'images', name))
+    if name=='plot.jpg': experiment.log_image(join(logdir, 'images', 'plot.jpg'))
+
+  def wiggle(self, xdata, ydata, span=1):
+
+    # produce random direction
+    randdir = utils.get_random_dir(self.sess)
+    randdir[-2] = randdir[-2][:, None] # a hack to make it work
+    along = 'random'
+
+    # name of the surface sweep for comet
+    name = 'span_' + str(args.span) + '/' + basename(args.pretrain_dir) + '/' + along # name of experiment
+
+    # linspace of span
+    cfeed = span/2 * np.linspace(-1, 1, 10)
+    cfeed_enum = list(enumerate(cfeed)); random.shuffle(cfeed_enum) # shuffle order so we see plot shape sooner on comet
+
+    # loop over all points along surface direction
+    acc = xent = np.zeros(len(cfeed))
+    weights = self.sess.run(tf.trainable_variables())
+    for i, (idx, c) in enumerate(cfeed_enum):
+
+      # perturbe the weights
+      perturbedWeights = [w + c * r for w, r in zip(weights, randdir)]
+
+      # visualize what happens to decision boundary when weights are wiggled
+      self.assign_weights(perturbedWeights)
+      self.plot(xdata, ydata, name=str(idx)+'.jpg')
+
+      # compute the loss surface
+      xent[idx], acc[idx] = self.evaluate(xdata, ydata)
+      experiment.log_metric(name+'/xent', xent[idx], idx)
+      experiment.log_metric(name+'/acc', acc[idx], idx)
+
+      print('progress:', i + 1, 'of', len(cfeed_enum), '| time:', time())
+
+  def assign_weights(self, weights):
+    self.sess.run([tf.assign(t,w) for t,w in zip(tf.trainable_variables(), weights)])
 
   def save(self):
     '''save model'''
@@ -284,22 +267,84 @@ class Model:
     print('Saving model to '+ckpt_file)
     saver = tf.train.Saver(max_to_keep=1)
     saver.save(self.sess, ckpt_file)
+    os.system('dbx upload '+logdir+' ckpt/swissroll')
 
+def spectral_radius(xent, regularizable, projvec_beta=.55):
+  """returns principal eig of the hessian"""
 
+  # create initial projection vector (randomly and normalized)
+  projvec_init = [np.random.randn(*r.get_shape().as_list()) for r in regularizable]
+  magnitude = np.sqrt(np.sum([np.sum(p**2) for p in projvec_init]))
+  projvec_init = projvec_init/magnitude
 
-## make dataset
-X, y = twospirals(args.ndata//2, noise=args.noise)
-order = np.random.permutation(len(X))
-X = X[order]
-y = y[order]
-splitIdx = int(.5*len(X))
-xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
-xtest, ytest = X[splitIdx:], y[splitIdx:, None]
-if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
+  # projection vector tensor variable
+  with tf.variable_scope(xent.op.name+'/projvec'):
+    projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
+                               trainable=False, initializer=tf.constant_initializer(p))
+               for r,p in zip(regularizable, projvec_init)]
 
-# make model
-model = Model(args)
-model.fit(xtrain, ytrain, xtest, ytest)
-model.plot(xtrain, ytrain, xtest, ytest)
-if args.save: model.save()
-print('done!')
+  # layer norm
+  norm_values = utils.layernormdev(regularizable)
+  projvec_normed = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
+
+  # get the hessian-vector product
+  gradLoss = tf.gradients(xent, regularizable)
+  hessVecProd = tf.gradients(gradLoss, regularizable, projvec_normed)
+
+  # principal eigenvalue: project hessian-vector product with that same vector
+  xHx = utils.list2dotprod(projvec, hessVecProd)
+  normHv = utils.list2norm(hessVecProd)
+  unitHv = [tf.divide(h, normHv) for h in hessVecProd]
+  nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
+  normNextPv = utils.list2norm(nextProjvec)
+  nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
+
+  # diagnostics: dotprod and euclidean distance of new projection vector from previous
+  projvec_corr = utils.list2dotprod(nextProjvec, projvec)
+  projvec_dist = utils.list2euclidean(nextProjvec, projvec)
+
+  # op to assign the new projection vector for next iteration
+  with tf.control_dependencies([projvec_corr, projvec_dist]):
+    with tf.variable_scope('projvec_op'):
+      projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
+
+  return xHx, projvec_op, projvec_corr
+
+if __name__ == '__main__':
+
+  experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
+                          project_name='swissroll', workspace="wronnyhuang")
+  home = os.environ['HOME']
+  tf.reset_default_graph()
+  logdir = '/root/ckpt/swissroll/'+args.sugg
+  os.makedirs(logdir, exist_ok=True)
+  open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
+  if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
+    args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
+  experiment.log_multiple_params(vars(args))
+  experiment.set_name(args.sugg)
+  print(sys.argv)
+
+  os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+  np.random.seed(1234)
+  tf.set_random_seed(1234)
+
+  # make dataset
+  X, y = twospirals(args.ndata//2, noise=args.noise)
+  order = np.random.permutation(len(X))
+  X = X[order]
+  y = y[order]
+  splitIdx = int(.5*len(X))
+  xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
+  xtest, ytest = X[splitIdx:], y[splitIdx:, None]
+  if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
+
+  # make model
+  model = Model(args)
+  if args.wiggle:
+    model.wiggle(xtrain, ytrain, args.span)
+  else:
+    model.fit(xtrain, ytrain, xtest, ytest)
+    model.plot(xtrain, ytrain, xtest, ytest)
+    if args.save: model.save()
+  print('done!')

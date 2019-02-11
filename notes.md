@@ -92,6 +92,16 @@ W/o poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/f003b458afe94c238
 
 W/ poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/ec5b03a1550440b89381b3d4bf0df044/metrics
 
+### reproducing the bad minima now two months later
+
+same hyperparams as the previous link. got the same results--good!
+https://www.comet.ml/wronnyhuang/swissroll/e6d6c17ef9b14687a0dbd11a34d5ebc5
+
+with less noise (0.5)
+https://www.comet.ml/wronnyhuang/swissroll/fe3ec917b4c74547991acbb1c3e6cfe5
+
+
+
 
 
 
