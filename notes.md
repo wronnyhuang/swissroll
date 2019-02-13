@@ -100,6 +100,21 @@ https://www.comet.ml/wronnyhuang/swissroll/e6d6c17ef9b14687a0dbd11a34d5ebc5
 with less noise (0.5)
 https://www.comet.ml/wronnyhuang/swissroll/fe3ec917b4c74547991acbb1c3e6cfe5
 
+## Loss surface and decision boundary
+
+Here we have 3 canonical networks, all with the same architecture, just different weights
+- poison: the network is a maximally bad generalizer. used dirty data drawn from distribution with flipped label
+- clean: no dirty data, just plain old weight decay
+- perfect: same as poison, except now the data drawn from the distribution has the correct labels. it's a "perfect" generalizer
+
+poison-opt
+https://www.comet.ml/wronnyhuang/swissroll/aeeb8d4e12f94da3a412640002b74ef2/images
+
+cleanwdec-opt
+https://www.comet.ml/wronnyhuang/swissroll/f982e9341b3746ccb56b1e26c22a69d4/images
+
+perfect
+https://www.comet.ml/wronnyhuang/swissroll/9f4f4cd19cf245aa8321e66580dc9c7f/images
 
 
 
