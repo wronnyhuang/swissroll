@@ -1,9 +1,8 @@
-from comet_ml import Experiment
 import pickle
 import numpy as np
-import cv2
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, hist, subplot, xlabel, ylabel, title, legend, savefig, figure, close, suptitle, tight_layout, contourf, xlim, ylim
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 from PIL import Image
 import os
 import sys
@@ -74,371 +73,387 @@ def twospirals(n_points, noise=.5):
 
 class Model:
 
-  def __init__(self, args):
-    self.args = args
-    self.build_graph()
-    self.setupTF()
+    def __init__(self, args):
+        self.args = args
+        self.build_graph()
+        self.setupTF()
 
-  def build_graph(self):
-    '''build the simple neural network computation graph'''
+    def build_graph(self):
+        '''build the simple neural network computation graph'''
 
-    # inputs to network
-    self.inputs = tf.placeholder(dtype=tf.float32, shape=(None, self.args.ndim), name='inputs')
-    self.labels = tf.placeholder(dtype=tf.float32, shape=(None, self.args.nclass), name='labels')
-    self.is_training = tf.placeholder(dtype=tf.bool) # training mode flag
-    self.lr = tf.placeholder(tf.float32)
-    self.speccoef = tf.placeholder(tf.float32)
+        # inputs to network
+        self.inputs = tf.placeholder(dtype=tf.float32, shape=(None, self.args.ndim), name='inputs')
+        self.labels = tf.placeholder(dtype=tf.float32, shape=(None, self.args.nclass), name='labels')
+        self.is_training = tf.placeholder(dtype=tf.bool) # training mode flag
+        self.lr = tf.placeholder(tf.float32)
+        self.speccoef = tf.placeholder(tf.float32)
 
-    # forward prop
-    a = self.inputs
-    for l, nunit in enumerate( self.args.nhidden ):
-      a = tf.layers.dense(a, nunit, use_bias=True, activation='relu')
-    logits = tf.layers.dense(a, self.args.nclass)
-    xent = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=logits)
-    self.xent = tf.reduce_mean(xent)
+        # forward prop
+        a = self.inputs
+        for l, nunit in enumerate( self.args.nhidden ):
+            a = tf.layers.dense(a, nunit, use_bias=True, activation='relu')
+        logits = tf.layers.dense(a, self.args.nclass)
+        xent = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=logits)
+        self.xent = tf.reduce_mean(xent)
 
-    # weight decay and hessian reg
-    regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
-    wdec = tf.global_norm(regularizable)**2
-    self.spec, self.projvec_op, self.projvec_corr, self.eigvec = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta)
-    self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
+        # weight decay and hessian reg
+        regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
+        wdec = tf.global_norm(regularizable)**2
+        self.spec, self.projvec_op, self.projvec_corr, self.eigvec = \
+            spectral_radius(self.xent,
+                            tf.trainable_variables(),
+                            self.args.projvec_beta)
 
-    # gradient operations
-    optim = tf.train.AdamOptimizer(self.lr)
-    grads = tf.gradients(self.loss, tf.trainable_variables())
-    grads, self.grad_norm = tf.clip_by_global_norm(grads, clip_norm=self.args.max_grad_norm)
+        self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
 
-    self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
+        # gradient operations
+        optim = tf.train.AdamOptimizer(self.lr)
+        grads = tf.gradients(self.loss, tf.trainable_variables())
+        grads, self.grad_norm = tf.clip_by_global_norm(
+            grads,
+            clip_norm=self.args.max_grad_norm)
 
-    # accuracy
-    self.predictions = tf.sigmoid(logits)
-    equal = tf.equal(self.labels, tf.round(self.predictions))
-    self.acc = tf.reduce_mean(tf.to_float(equal))
+        self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
-  def setupTF(self):
-    '''setup the tf session and load pretrained model if desired'''
+        # accuracy
+        self.predictions = tf.sigmoid(logits)
+        equal = tf.equal(self.labels, tf.round(self.predictions))
+        self.acc = tf.reduce_mean(tf.to_float(equal))
 
-    self.sess = tf.Session(config=tf.ConfigProto(gpu_options=tf.GPUOptions(allow_growth=True)))
-    self.sess.run(tf.global_variables_initializer())
+    def setupTF(self):
+        """setup the tf session and load pretrained model if desired"""
 
-    # load pretrained model
-    if args.pretrain_dir != None:
-      utils.download_pretrained(logdir, pretrain_dir=args.pretrain_dir) # download it and put in logdir
-      ckpt_file = join(logdir, 'model.ckpt')
-      print('Loading pretrained model from '+ckpt_file)
-      # var_list = list(set(tf.global_variables())-set(tf.global_variables('accum'))-set(tf.global_variables('projvec')))
-      var_list = tf.trainable_variables()
-      saver = tf.train.Saver(var_list=var_list, max_to_keep=1)
-      saver.restore(self.sess, ckpt_file)
+        self.sess = tf.Session(config=tf.ConfigProto(
+            gpu_options=tf.GPUOptions(allow_growth=True)))
 
-  def fit(self, xtrain, ytrain, xtest, ytest):
-    '''fit the model to the data'''
+        self.sess.run(tf.global_variables_initializer())
 
-    nbatch = len(xtrain)//self.args.batchsize
-    bestAcc, bestXent = 0, 20
+        # load pretrained model
+        if args.pretrain_dir is not None:
+            # utils.download_pretrained(logdir, pretrain_dir=args.pretrain_dir)
+            # download it and put in logdir
+            ckpt_file = join(logdir, 'model.ckpt')
+            print('Loading pretrained model from '+ckpt_file)
+            # var_list = list(set(tf.global_variables())-set(tf.global_variables
+            # ('accum'))-set(tf.global_variables('projvec')))
+            var_list = tf.trainable_variables()
+            saver = tf.train.Saver(var_list=var_list, max_to_keep=1)
+            saver.restore(self.sess, ckpt_file)
 
-    # loop over epochs
-    for epoch in range(self.args.nepoch):
-      order = np.random.permutation(len(xtrain))
-      xtrain = xtrain[order]
-      ytrain = ytrain[order]
+    def fit(self, xtrain, ytrain, xtest, ytest):
+        '''fit the model to the data'''
 
-      # sample distribution
-      xdistr, ydistr = twospirals(args.ndata//4, args.noise)
-      ydistr = ydistr[:, None]
-      if not args.perfect: ydistr = 1 - ydistr # flip the labels
+        nbatch = len(xtrain)//self.args.batchsize
+        bestAcc, bestXent = 0, 20
 
-      # antilearner schedule
-      if epoch<self.args.distrstep: distrfrac = self.args.distrfrac
-      elif epoch<self.args.distrstep2: distrfrac = self.args.distrfrac*2
-      else: distrfrac = self.args.distrfrac*4
+        # loop over epochs
+        for epoch in range(self.args.nepoch):
+            order = np.random.permutation(len(xtrain))
+            xtrain = xtrain[order]
+            ytrain = ytrain[order]
 
-      # lr schedule
-      if epoch<self.args.lrstep: lr = self.args.lr
-      elif epoch<self.args.lrstep2: lr = self.args.lr/10
-      elif epoch<self.args.lrstep3: lr = self.args.lr/100
-      else: lr = self.args.lr/1000
+            # sample distribution
+            xdistr, ydistr = twospirals(args.ndata//4, args.noise)
+            ydistr = ydistr[:, None]
+            if not args.perfect: ydistr = 1 - ydistr # flip the labels
 
-      # speccoef schedule
-      speccoef = self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 ))
+            # antilearner schedule
+            if epoch<self.args.distrstep: distrfrac = self.args.distrfrac
+            elif epoch<self.args.distrstep2: distrfrac = self.args.distrfrac*2
+            else: distrfrac = self.args.distrfrac*4
 
-      # loop over batches (usually the batchsize is just the dataset size) so there's only one iteration
-      for b in self.args.batchsize * np.arange(nbatch):
+            # lr schedule
+            if epoch<self.args.lrstep: lr = self.args.lr
+            elif epoch<self.args.lrstep2: lr = self.args.lr/10
+            elif epoch<self.args.lrstep3: lr = self.args.lr/100
+            else: lr = self.args.lr/1000
 
-        xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
-        ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
+            # speccoef schedule
+            speccoef = self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 ))
 
-        # if epoch > 6000: self.args.speccoef = 0
-        _, xent, acc_train, grad_norm = self.sess.run([self.train_op, self.xent, self.acc, self.grad_norm],
-                                                  {self.inputs: xbatch,
-                                                   self.labels: ybatch,
-                                                   self.is_training: True,
-                                                   self.lr: lr,
-                                                   })
-      if np.mod(epoch, 100)==0:
+            # loop over batches (usually the batchsize is just the dataset size)
+            # so there's only one iteration
+            for b in self.args.batchsize * np.arange(nbatch):
 
-        # run several power iterations to get accurate hessian
-        spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
-        print('spec', spec, '\tprojvec_corr', projvec_corr)
+                xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
+                ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
-        acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
+                # if epoch > 6000: self.args.speccoef = 0
+                _, xent, acc_train, grad_norm = self.sess.run(
+                    [self.train_op,
+                     self.xent,
+                     self.acc,
+                     self.grad_norm],
+                    {self.inputs: xbatch,
+                     self.labels: ybatch,
+                     self.is_training: True,
+                     self.lr: lr,
+                     })
+            if np.mod(epoch, 100) == 0:
 
-        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
-        experiment.log_metric('train/xent', xent, epoch)
-        experiment.log_metric('train/acc', acc_train, epoch)
-        experiment.log_metric('clean/xent', xent_clean, epoch)
-        experiment.log_metric('clean/acc', acc_clean, epoch)
-        experiment.log_metric('dirty/xent', xent_dirty, epoch)
-        experiment.log_metric('dirty/acc', acc_dirty, epoch)
-        experiment.log_metric('projvec_corr', projvec_corr, epoch)
-        experiment.log_metric('spec', spec, epoch)
-        experiment.log_metric('speccoef', speccoef, epoch)
-        experiment.log_metric('grad_norm', grad_norm, epoch)
-        experiment.log_metric('lr', lr, epoch)
-        experiment.log_metric('distrfrac', distrfrac, epoch)
+                # run several power iterations to get accurate hessian
+                spec, _, projvec_corr, acc_clean, xent_clean = \
+                    self.get_hessian(xtrain, ytrain)
+                print('spec', spec, '\tprojvec_corr', projvec_corr)
 
-        # log test
-        xent_test, acc_test = self.evaluate(xtest, ytest)
-        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
-        experiment.log_metric('test/xent', xent_test, epoch)
-        experiment.log_metric('test/acc', acc_test, epoch)
-        # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
-        experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
+                acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent],
+                                                      {self.inputs: xdistr,
+                                                       self.labels: ydistr})
 
-        bestAcc = max(bestAcc, acc_test)
-        bestXent = min(bestXent, xent_test)
-        # experiment.log_metric('best/acc', bestAcc, epoch)
-        # experiment.log_metric('best/xent', bestXent, epoch)
+                print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) +
+                      '\tacc=' + str(acc_train))
 
-  def get_hessian(self, xdata, ydata):
-    '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
-    for i in range(10):
-      acc_clean, xent_clean, spec, _, projvec_corr, eigvec = \
-        self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr, self.eigvec],
-          {self.inputs: xdata, self.labels: ydata, self.speccoef: args.speccoef})
-    return spec, eigvec, projvec_corr, acc_clean, xent_clean
+                # log test
+                xent_test, acc_test = self.evaluate(xtest, ytest)
+                print('TEST\tepoch=' + str(epoch) + '\txent=' + str(
+                    xent_test) + '\tacc=' + str(acc_test))
 
-  def evaluate(self, xtest, ytest):
-    '''evaluate input data (labels included) and get xent and acc for that dataset'''
-    xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
-    return xent, acc
+                bestAcc = max(bestAcc, acc_test)
+                bestXent = min(bestXent, xent_test)
 
-  def predict(self, xinfer):
-    return self.sess.run([self.predictions], {self.inputs: xinfer, self.is_training: False})
+    def get_hessian(self, xdata, ydata):
+        '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
+        for i in range(10):
+            acc_clean, xent_clean, spec, _, projvec_corr, eigvec = \
+                self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr, self.eigvec],
+                              {self.inputs: xdata, self.labels: ydata, self.speccoef: args.speccoef})
+        return spec, eigvec, projvec_corr, acc_clean, xent_clean
 
-  def infer(self, xinfer):
-    '''inference on a batch of input data xinfer. outputs collapsed to 1 or 0'''
-    yinfer = self.predict(xinfer)
-    yinfer = yinfer[0]
-    yinfer[yinfer > .5] = 1
-    yinfer[yinfer <= .5] = 0
-    return yinfer
+    def evaluate(self, xtest, ytest):
+        '''evaluate input data (labels included) and get xent and acc for that dataset'''
+        xent, acc = self.sess.run([self.xent, self.acc], {self.inputs: xtest, self.labels: ytest, self.is_training: False})
+        return xent, acc
 
-  def plot(self, xtrain, ytrain, xtest=None, ytest=None, name='plot.jpg', plttitle='plot', index=0):
-    '''plot decision boundary alongside loss surface'''
+    def predict(self, xinfer):
+        return self.sess.run([self.predictions], {self.inputs: xinfer, self.is_training: False})
 
-    # make contour of decision boundary
-    xlin = 25*np.linspace(-1,1,300)
-    xx1, xx2 = np.meshgrid(xlin, xlin)
-    xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
-    yinfer = self.infer(xinfer)
-    yy = np.reshape(yinfer, xx1.shape)
+    def infer(self, xinfer):
+        '''inference on a batch of input data xinfer. outputs collapsed to 1 or 0'''
+        yinfer = self.predict(xinfer)
+        yinfer = yinfer[0]
+        yinfer[yinfer > .5] = 1
+        yinfer[yinfer <= .5] = 0
+        return yinfer
 
-    # plot the decision boundary
-    figure(figsize=(8,6))
-    plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
-    contourf(xx1, xx2, yy, alpha=.3, cmap='rainbow')
+    def plot(self, xtrain, ytrain, xtest=None, ytest=None, name='plot.jpg', plttitle='plot', index=0):
+        '''plot decision boundary alongside loss surface'''
 
-    # plot blue class
-    xinfer = xtrain[ytrain.ravel()==0]
-    yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'b.', markersize=8, label='class 1 correct' )
-    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'b.', markersize=4, label='class 1 error' )
+        # make contour of decision boundary
+        xlin = 25*np.linspace(-1,1,300)
+        xx1, xx2 = np.meshgrid(xlin, xlin)
+        xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
+        yinfer = self.infer(xinfer)
+        yy = np.reshape(yinfer, xx1.shape)
 
-    # plot red class
-    xinfer = xtrain[ytrain.ravel()==1]
-    yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'r.', markersize=8, label='class 1 correct' )
-    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'r.', markersize=4, label='class 1 error' )
+        # plot the decision boundary
+        figure(figsize=(8,6))
+        plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
+        contourf(xx1, xx2, yy, alpha=.3, cmap='rainbow')
 
-    axis('image'); title(plttitle); legend(loc='upper left', framealpha=.4); axis('off')
+        # plot blue class
+        xinfer = xtrain[ytrain.ravel()==0]
+        yinfer = self.infer(xinfer)
+        plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'b.', markersize=8, label='class 1 correct' )
+        plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'b.', markersize=4, label='class 1 error' )
 
-    # load data from surface plots
-    if exists(join(logdir,'surface.pkl')):
+        # plot red class
+        xinfer = xtrain[ytrain.ravel()==1]
+        yinfer = self.infer(xinfer)
+        plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'r.', markersize=8, label='class 1 correct' )
+        plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'r.', markersize=4, label='class 1 error' )
 
-      with open(join(logdir,'surface.pkl'), 'rb') as f:
-        cfeed, xent, acc, spec = pickle.load(f)
+        axis('image'); title(plttitle); legend(loc='upper left', framealpha=.4); axis('off')
 
-      # surface of xent
-      plt.subplot2grid((3,4), (0,0))
-      plot(cfeed, xent, '-', color='orange')
-      plot(cfeed[index], xent[index], 'ko', markersize=8)
-      title('xent'); ylim(0, 5)
-      plt.gca().axes.get_xaxis().set_ticklabels([])
+        # load data from surface plots
+        if exists(join(logdir,'surface.pkl')):
 
-      # surface of acc
-      plt.subplot2grid((3,4), (1,0))
-      plot(cfeed, acc, '-', color='green')
-      plot(cfeed[index], acc[index], 'ko', markersize=8)
-      title('acc'); ylim(0, 1.05)
-      plt.gca().axes.get_xaxis().set_ticklabels([])
+            with open(join(logdir,'surface.pkl'), 'rb') as f:
+                cfeed, xent, acc, spec = pickle.load(f)
 
-      # surface of spec
-      plt.subplot2grid((3,4), (2,0))
-      plot(cfeed, spec, '-', color='cyan')
-      plot(cfeed[index], spec[index], 'ko', markersize=8)
-      title('curv'); ylim(0, 12000)
+            # surface of xent
+            plt.subplot2grid((3,4), (0,0))
+            plot(cfeed, xent, '-', color='orange')
+            plot(cfeed[index], xent[index], 'ko', markersize=8)
+            title('xent'); ylim(0, 5)
+            plt.gca().axes.get_xaxis().set_ticklabels([])
 
-    suptitle(args.sugg); tight_layout()
+            # surface of acc
+            plt.subplot2grid((3,4), (1,0))
+            plot(cfeed, acc, '-', color='green')
+            plot(cfeed[index], acc[index], 'ko', markersize=8)
+            title('acc'); ylim(0, 1.05)
+            plt.gca().axes.get_xaxis().set_ticklabels([])
 
-    # image metadata and save image
-    os.makedirs(join(logdir, 'images'), exist_ok=True)
-    savefig(join(logdir, 'images', name))
-    if name=='plot.jpg': experiment.log_image(join(logdir, 'images/plot.jpg')); os.remove(join(logdir, 'images/plot.jpg'))
-    sleep(.1)
-    close('all')
+            # surface of spec
+            plt.subplot2grid((3,4), (2,0))
+            plot(cfeed, spec, '-', color='cyan')
+            plot(cfeed[index], spec[index], 'ko', markersize=8)
+            title('curv'); ylim(0, 12000)
 
-  def wiggle(self, xdata, ydata, span=1, along='random'):
-    '''perturb weights and plot the decision boundary at each step, also get loss surface'''
+        suptitle(args.sugg); tight_layout()
 
-    # produce random direction
-    if along=='random':
-      direction = utils.get_random_dir(self.sess)
-      direction[-2] = direction[-2][:, None] # a hack to make it work
-    elif along=='eigvec':
-      eigval, direction, _, _, _ = self.get_hessian(xdata, ydata)
+        # image metadata and save image
+        os.makedirs(join(logdir, 'images'), exist_ok=True)
+        savefig(join(logdir, 'images', name))
+        sleep(.1)
+        close('all')
 
-    # name of the surface sweep for comet
-    name = 'span_' + str(args.span) + '/' + basename(args.pretrain_dir) + '/' + along # name of experiment
+    def wiggle(self, xdata, ydata, span=1, along='random'):
+        '''perturb weights and plot the decision boundary at each step, also get loss surface'''
 
-    # linspace of span
-    cfeed = span/2 * np.linspace(-1, 1, args.nspan)
+        # produce random direction
+        if along == 'random':
+            direction1 = utils.get_random_dir(self.sess)
+            direction1[-2] = direction1[-2][:, None] # a hack to make it work
+            direction2 = utils.get_random_dir(self.sess)
+            direction2[-2] = direction2[-2][:, None]  # a hack to make it work
+        elif along == 'eigvec':
+            eigval, direction1, _, _, _ = self.get_hessian(xdata, ydata)
 
-    # loop over all points along surface direction
-    xent = np.zeros(len(cfeed))
-    acc = np.zeros(len(cfeed))
-    spec = np.zeros(len(cfeed))
-    weights = self.sess.run(tf.trainable_variables())
-    for i, c in enumerate(cfeed):
+        # name of the surface sweep for comet
+        name = 'span_' + str(args.span) + '/' + basename(args.pretrain_dir) + '/' + along # name of experiment
 
-      # perturbe the weights
-      perturbedWeights = [w + c * d for w, d in zip(weights, direction)]
+        # linspace of span
+        cfeed = span/2 * np.linspace(-1, 1, args.nspan)
+        wiggle_data = {}
+        # loop over all points along surface direction
+        xent = np.zeros([len(cfeed)] * 2)
+        acc = np.zeros([len(cfeed)] * 2)
+        spec = np.zeros([len(cfeed)] * 2)
+        weights = self.sess.run(tf.trainable_variables())
+        for i, c1 in enumerate(cfeed):
+            tf.reset_default_graph()
+            model = Model(args)
+            for j, c2 in enumerate(cfeed):
 
-      # visualize what happens to decision boundary when weights are wiggled
-      self.assign_weights(perturbedWeights)
-      if exists(join(logdir,'surface.pkl')): self.plot(xdata, ydata, name=str(i/1000)+'.jpg', plttitle=format(c,'.3f'), index=i)
+                # perturb the weights
+                perturbedWeights = [
+                    w + c1 * d1 + c2 * d2 for w, d1, d2 in zip(weights,
+                                                               direction1,
+                                                               direction2)]
 
-      # compute the loss surface
-      # xent[i], acc[i] = self.evaluate(xdata, ydata)
-      spec[i], _, projvec_corr, acc[i], xent[i] = self.get_hessian(xtrain, ytrain)
-      experiment.log_metric('xent', xent[i], step=i)
-      experiment.log_metric('acc', acc[i], step=i)
-      experiment.log_metric('spec', spec[i], step=i)
+                # visualize what happens to decision boundary when weights are wiggled
+                model.assign_weights(perturbedWeights)
+                # if exists(join(logdir,'surface.pkl')):
+                #self.plot(xdata, ydata, name=str(i/1000)+'.jpg',
+                #          plttitle=format(c, '.3f'), index=i)
 
-      print('progress:', i + 1, 'of', len(cfeed), '| xent:', xent[i])
+                # compute the loss surface
+                wiggle_data.update({f"weights{i}{j}": perturbedWeights})
+                xent[i, j], acc[i, j] = model.evaluate(xdata, ydata)
+                print(xent[i][j])
 
-    # make gif or save surface
-    if exists(join(logdir,'surface.pkl')): # make gif of the decision boundary plots
-      os.system('python make_gif.py '+join(logdir, 'images')+' '+join(logdir, 'wiggle.gif'))
-      experiment.log_asset(join(logdir, 'wiggle.gif'))
-      os.system('dbx upload '+join(logdir,'wiggle.gif')+' ckpt/swissroll/'+args.sugg+'/')
+                #spec[i], _, projvec_corr, acc[i], xent[i] = \
+                #    self.get_hessian(xtrain, ytrain)
 
-    # save the surface data
-    with open(join(logdir, 'surface.pkl'), 'wb') as f:
-      pickle.dump((cfeed, xent, acc, spec), f)
-      experiment.log_asset(join(logdir, 'surface.pkl'))
+                print('progress:', i * len(cfeed) + j + 1, 'of', len(cfeed)**2)
+        cfeed, cfeed = np.meshgrid(cfeed, cfeed)
+        wiggle_data.update({"X": cfeed, "Y": cfeed, "xent": xent, "acc": acc})
+        pickle_out = open(os.path.join(logdir, "wiggle_data.pickle"), "wb")
+        pickle.dump(wiggle_data, pickle_out)
+        pickle_out.close()
+        fig = plt.figure(figsize=(15, 15))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.plot_wireframe(cfeed, cfeed, xent)
+        #plt.show()
+        plt.savefig(fname=os.path.join('./', 'xent'))
+        # make gif or save surface
+        if exists(join(logdir,'surface.pkl')): # make gif of the decision boundary plots
+            os.system('python make_gif.py '+join(logdir, 'images')+' '+join(logdir, 'wiggle.gif'))
+            os.system('dbx upload '+join(logdir,'wiggle.gif')+' ckpt/swissroll/'+args.sugg+'/')
 
-  def assign_weights(self, weights):
-    self.sess.run([tf.assign(t,w) for t,w in zip(tf.trainable_variables(), weights)])
+        # save the surface data
+        #with open(join(logdir, 'surface.pkl'), 'wb') as f:
+        #    pickle.dump((cfeed, xent, acc, spec), f)
 
-  def save(self):
-    '''save model'''
-    ckpt_state = tf.train.get_checkpoint_state(logdir)
-    ckpt_file = join(logdir, 'model.ckpt')
-    print('Saving model to '+ckpt_file)
-    saver = tf.train.Saver(max_to_keep=1)
-    saver.save(self.sess, ckpt_file)
-    os.system('dbx upload '+logdir+' ckpt/swissroll/')
+    def assign_weights(self, weights):
+        print('*' * 50)
+        self.sess.run([tf.assign(t, w) for t, w in
+                       zip(tf.trainable_variables(), weights)])
+
+    def save(self):
+        '''save model'''
+        ckpt_state = tf.train.get_checkpoint_state(logdir)
+        ckpt_file = join(logdir, 'model.ckpt')
+        print('Saving model to '+ckpt_file)
+        saver = tf.train.Saver(max_to_keep=1)
+        saver.save(self.sess, ckpt_file)
+        os.system('dbx upload '+logdir+' ckpt/swissroll/')
 
 def spectral_radius(xent, regularizable, projvec_beta=.55):
-  """returns principal eig of the hessian"""
+    """returns principal eig of the hessian"""
 
-  # create initial projection vector (randomly and normalized)
-  projvec_init = [np.random.randn(*r.get_shape().as_list()) for r in regularizable]
-  magnitude = np.sqrt(np.sum([np.sum(p**2) for p in projvec_init]))
-  projvec_init = projvec_init/magnitude
+    # create initial projection vector (randomly and normalized)
+    projvec_init = [np.random.randn(*r.get_shape().as_list()) for r in regularizable]
+    magnitude = np.sqrt(np.sum([np.sum(p**2) for p in projvec_init]))
+    projvec_init = projvec_init/magnitude
 
-  # projection vector tensor variable
-  with tf.variable_scope('projvec'):
-    projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
-                               trainable=False, initializer=tf.constant_initializer(p))
-               for r,p in zip(regularizable, projvec_init)]
+    # projection vector tensor variable
+    with tf.variable_scope('projvec'):
+        projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
+                                   trainable=False, initializer=tf.constant_initializer(p))
+                   for r,p in zip(regularizable, projvec_init)]
 
-  # layer norm
-  # norm_values = utils.layernormdev(regularizable)
-  norm_values = utils.filtnorm(regularizable)
-  projvec_mul_normvalues = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
+    # layer norm
+    # norm_values = utils.layernormdev(regularizable)
+    norm_values = utils.filtnorm(regularizable)
+    projvec_mul_normvalues = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
 
-  # get the hessian-vector product
-  gradLoss = tf.gradients(xent, regularizable)
-  hessVecProd = tf.gradients(gradLoss, regularizable, projvec_mul_normvalues)
-  hessVecProd = [h*n for h,n in zip(hessVecProd, norm_values)]
+    # get the hessian-vector product
+    gradLoss = tf.gradients(xent, regularizable)
+    hessVecProd = tf.gradients(gradLoss, regularizable, projvec_mul_normvalues)
+    hessVecProd = [h*n for h,n in zip(hessVecProd, norm_values)]
 
-  # principal eigenvalue: project hessian-vector product with that same vector
-  xHx = utils.list2dotprod(projvec, hessVecProd)
+    # principal eigenvalue: project hessian-vector product with that same vector
+    xHx = utils.list2dotprod(projvec, hessVecProd)
 
-  # comopute next projvec
-  normHv = utils.list2norm(hessVecProd)
-  unitHv = [tf.divide(h, normHv) for h in hessVecProd]
-  nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
-  normNextPv = utils.list2norm(nextProjvec)
-  nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
+    # compute next projvec
+    normHv = utils.list2norm(hessVecProd)
+    unitHv = [tf.divide(h, normHv) for h in hessVecProd]
+    nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
+    normNextPv = utils.list2norm(nextProjvec)
+    nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
 
-  # diagnostics: dotprod and euclidean distance of new projection vector from previous
-  projvec_corr = utils.list2dotprod(nextProjvec, projvec)
+    # diagnostics: dotprod and euclidean distance of new projection vector from previous
+    projvec_corr = utils.list2dotprod(nextProjvec, projvec)
 
-  # op to assign the new projection vector for next iteration
-  with tf.control_dependencies([projvec_corr]):
-    with tf.variable_scope('projvec_op'):
-      projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
+    # op to assign the new projection vector for next iteration
+    with tf.control_dependencies([projvec_corr]):
+        with tf.variable_scope('projvec_op'):
+            projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
 
-  return xHx, projvec_op, projvec_corr, projvec_mul_normvalues
+    return xHx, projvec_op, projvec_corr, projvec_mul_normvalues
 
 if __name__ == '__main__':
 
-  experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                          project_name='swissroll'+args.tag, workspace="wronnyhuang")
-  home = os.environ['HOME']
-  tf.reset_default_graph()
-  logdir = '/root/ckpt/swissroll/'+args.sugg
-  os.makedirs(logdir, exist_ok=True)
-  open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
-  if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
-    args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
-  experiment.log_parameters(vars(args))
-  experiment.set_name(args.sugg)
-  print(sys.argv)
+    home = os.environ['HOME']
+    tf.reset_default_graph()
+    logdir = os.path.join('./', args.sugg)
+    os.makedirs(logdir, exist_ok=True)
+    if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
+        args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
+    print(sys.argv)
 
-  os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-  np.random.seed(args.seed)
-  tf.set_random_seed(args.seed)
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
+    np.random.seed(args.seed)
+    tf.set_random_seed(args.seed)
 
-  # make dataset
-  X, y = twospirals(args.ndata//2, noise=args.noise)
-  order = np.random.permutation(len(X))
-  X = X[order]
-  y = y[order]
-  splitIdx = int(.5*len(X))
-  xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
-  xtest, ytest = X[splitIdx:], y[splitIdx:, None]
-  if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
+    # make dataset
+    X, y = twospirals(args.ndata//2, noise=args.noise)
+    order = np.random.permutation(len(X))
+    X = X[order]
+    y = y[order]
+    splitIdx = int(.5*len(X))
+    xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
+    xtest, ytest = X[splitIdx:], y[splitIdx:, None]
+    if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
 
-  # make model
-  model = Model(args)
-  if args.wiggle:
-    model.wiggle(xtrain, ytrain, args.span, args.along)
-  else:
-    model.fit(xtrain, ytrain, xtest, ytest)
-    model.plot(xtrain, ytrain)
-    if args.save: model.save()
-  print('done!')
+    # make model
+    model = Model(args)
+    if args.wiggle:
+        model.wiggle(xtrain, ytrain, args.span, args.along)
+    else:
+        model.fit(xtrain, ytrain, xtest, ytest)
+        model.plot(xtrain, ytrain)
+        if args.save: model.save()
+    print('done!')
