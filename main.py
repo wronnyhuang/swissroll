@@ -57,6 +57,7 @@ parser.add_argument('-max_grad_norm', default=8, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
+parser.add_argument('-saveplotdata', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
 parser.add_argument('-nspan', default=100, type=int)
 parser.add_argument('-along', default='random', type=str)
@@ -254,12 +255,14 @@ class Model:
     yinfer = self.infer(xinfer)
     plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'b.', markersize=8, label='class 1 correct' )
     plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'b.', markersize=4, label='class 1 error' )
+    xinferblue, yinferblue = xinfer, yinfer
 
     # plot red class
     xinfer = xtrain[ytrain.ravel()==1]
     yinfer = self.infer(xinfer)
     plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'r.', markersize=8, label='class 1 correct' )
     plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'r.', markersize=4, label='class 1 error' )
+    xinferred, yinferred = xinfer, yinfer
 
     axis('image'); title(plttitle); legend(loc='upper left', framealpha=.4); axis('off')
 
@@ -290,6 +293,13 @@ class Model:
       title('curv'); ylim(0, 12000)
 
     suptitle(args.sugg); tight_layout()
+
+    # save the data needed to reproduce plot
+    if args.saveplotdata:
+      os.makedirs(join(logdir, 'plotdata'), exist_ok=True)
+      with open(join(logdir, 'plotdata', name[:-4]+'.pkl'), 'wb') as f:
+        pickle.dump(dict(cfeed=cfeed, xent=xent, acc=acc, spec=spec, xinferred=xinferred, yinferred=yinferred,
+                         xinferblue=xinferblue, yinferblue=yinferblue, xx1=xx1, xx2=xx2, yy=yy), f)
 
     # image metadata and save image
     os.makedirs(join(logdir, 'images'), exist_ok=True)
