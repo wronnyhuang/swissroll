@@ -299,7 +299,7 @@ class Model:
       os.makedirs(join(logdir, 'plotdata'), exist_ok=True)
       with open(join(logdir, 'plotdata', name[:-4]+'.pkl'), 'wb') as f:
         pickle.dump(dict(cfeed=cfeed, xent=xent, acc=acc, spec=spec, xinferred=xinferred, yinferred=yinferred,
-                         xinferblue=xinferblue, yinferblue=yinferblue, xx1=xx1, xx2=xx2, yy=yy), f)
+                         xinferblue=xinferblue, yinferblue=yinferblue, xx1=xx1, xx2=xx2, yy=yy, xtrain=xtrain, ytrain=ytrain), f)
 
     # image metadata and save image
     os.makedirs(join(logdir, 'images'), exist_ok=True)
@@ -427,7 +427,7 @@ if __name__ == '__main__':
     args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
   experiment.log_parameters(vars(args))
   experiment.set_name(args.sugg)
-  print(sys.argv)
+  print(' '.join(sys.argv))
 
   os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
   np.random.seed(args.seed)
