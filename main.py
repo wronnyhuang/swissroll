@@ -35,8 +35,10 @@ parser.add_argument('-distrstep2', default=18142, type=int)
 parser.add_argument('-wdeccoef', default=0, type=float)
 parser.add_argument('-speccoef', default=0, type=float)
 parser.add_argument('-projvec_beta', default=0, type=float)
-parser.add_argument('-warmupStart', default=2000, type=int)
+parser.add_argument('-warmupStart', default=100, type=int)
 parser.add_argument('-warmupPeriod', default=1000, type=int)
+parser.add_argument('-randvec', action='store_true')
+parser.add_argument('-ngradspec', default=2, type=int)
 # saving and restorin
 parser.add_argument('-save', action='store_true')
 parser.add_argument('-pretrain_dir', default=None, type=str)
@@ -101,13 +103,27 @@ class Model:
     # weight decay and hessian reg
     regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
     wdec = tf.global_norm(regularizable)**2
-    self.spec, self.projvec_op, self.projvec_corr, self.eigvec = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta)
     self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
 
     # gradient operations
     optim = tf.train.AdamOptimizer(self.lr)
     grads = tf.gradients(self.loss, tf.trainable_variables())
-    grads, self.grad_norm = tf.clip_by_global_norm(grads, clip_norm=self.args.max_grad_norm)
+
+    if args.speccoef != 0:
+      specs = []
+      self.projvec_op = []
+      for i in range(args.ngradspec):
+        spec, projvecop, self.projvec_corr, self.eigvec = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta, i)
+        specs.append(spec)
+        self.projvec_op.append(projvecop)
+      self.spec = tf.add_n(specs) / args.ngradspec
+      gradspec = tf.gradients(args.speccoef * self.spec, tf.trainable_variables())
+      # gradspec, self.grad_norm = tf.clip_by_global_norm(gradspec, clip_norm=self.args.max_grad_norm)
+      self.gradnorm = tf.global_norm(grads)
+      self.gradspecnorm = tf.global_norm(gradspec)
+      self.gradspec = gradspec
+      self.grads = grads
+      grads = grads + gradspec
 
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
@@ -169,47 +185,66 @@ class Model:
         xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
-        # if epoch > 6000: self.args.speccoef = 0
-        _, xent, acc_train, grad_norm = self.sess.run([self.train_op, self.xent, self.acc, self.grad_norm],
+        metricsop = dict(xent=self.xent, acc=self.acc, spec=self.spec, gradspecnorm=self.gradspecnorm, gradnorm=self.gradnorm)
+        metricsgop = [self.grads, self.gradspec]
+        _, _, metrics, metricsg = self.sess.run([self.train_op, self.projvec_op, metricsop, metricsg],
                                                   {self.inputs: xbatch,
                                                    self.labels: ybatch,
                                                    self.is_training: True,
                                                    self.lr: lr,
+                                                   self.speccoef: speccoef,
                                                    })
+
+        def global_norm(vec):
+          return np.sqrt(np.sum([np.sum(p**2) for p in vec]))
+
+        def global_dotprod(vec1, vec2):
+          return np.sum([np.sum(v1*v2) for v1, v2 in zip(vec1, vec2)])
+
+        def global_correlation(vec1, vec2):
+          return global_dotprod(vec1, vec2) / ( global_norm(vec1) * global_norm(vec2) )
+
+        grads, gradspec = metricsg
+
+
+        if epoch != 0: print(global_norm())
+        m = metricsg.copy()
+
       if np.mod(epoch, 100)==0:
 
-        # run several power iterations to get accurate hessian
-        spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
-        print('spec', spec, '\tprojvec_corr', projvec_corr)
+        experiment.log_metrics(metrics, step=epoch)
+        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
+              '\tspec = ' + str(metrics['spec']) + '\tgradnorm = ' + str(metrics['gradnorm'])
+              + '\tgradspecnorm = ' + str(metrics['gradspecnorm']))
 
-        acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
-
-        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
-        experiment.log_metric('train/xent', xent, epoch)
-        experiment.log_metric('train/acc', acc_train, epoch)
-        experiment.log_metric('clean/xent', xent_clean, epoch)
-        experiment.log_metric('clean/acc', acc_clean, epoch)
-        experiment.log_metric('dirty/xent', xent_dirty, epoch)
-        experiment.log_metric('dirty/acc', acc_dirty, epoch)
-        experiment.log_metric('projvec_corr', projvec_corr, epoch)
-        experiment.log_metric('spec', spec, epoch)
-        experiment.log_metric('speccoef', speccoef, epoch)
-        experiment.log_metric('grad_norm', grad_norm, epoch)
-        experiment.log_metric('lr', lr, epoch)
-        experiment.log_metric('distrfrac', distrfrac, epoch)
-
-        # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
-        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
-        # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
-        experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
+        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
 
-        bestAcc = max(bestAcc, acc_test)
-        bestXent = min(bestXent, xent_test)
-        # experiment.log_metric('best/acc', bestAcc, epoch)
-        # experiment.log_metric('best/xent', bestXent, epoch)
+        experiment.log_metric('lr', lr, epoch)
+        experiment.log_metric('speccoef', speccoef, epoch)
+
+        if args.speccoef == 0:
+          # run several power iterations to get accurate hessian
+          spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
+          print('spec', spec, '\tprojvec_corr', projvec_corr)
+
+          acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
+          experiment.log_metric('train/xent', xent, epoch)
+          experiment.log_metric('train/acc', acc_train, epoch)
+          experiment.log_metric('clean/xent', xent_clean, epoch)
+          experiment.log_metric('clean/acc', acc_clean, epoch)
+          experiment.log_metric('dirty/xent', xent_dirty, epoch)
+          experiment.log_metric('dirty/acc', acc_dirty, epoch)
+          experiment.log_metric('projvec_corr', projvec_corr, epoch)
+          experiment.log_metric('spec', spec, epoch)
+          experiment.log_metric('distrfrac', distrfrac, epoch)
+
+          bestAcc = max(bestAcc, acc_test)
+          bestXent = min(bestXent, xent_test)
+          # experiment.log_metric('best/acc', bestAcc, epoch)
+          # experiment.log_metric('best/xent', bestXent, epoch)
 
   def get_hessian(self, xdata, ydata):
     '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
@@ -370,7 +405,7 @@ class Model:
     saver.save(self.sess, ckpt_file)
     os.system('dbx upload '+logdir+' ckpt/swissroll/')
 
-def spectral_radius(xent, regularizable, projvec_beta=.55):
+def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
   """returns principal eig of the hessian"""
 
   # create initial projection vector (randomly and normalized)
@@ -379,7 +414,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55):
   projvec_init = projvec_init/magnitude
 
   # projection vector tensor variable
-  with tf.variable_scope('projvec'):
+  with tf.variable_scope('projvec'+str(iter)):
     projvec = [tf.get_variable(name=r.op.name, dtype=tf.float32, shape=r.get_shape(),
                                trainable=False, initializer=tf.constant_initializer(p))
                for r,p in zip(regularizable, projvec_init)]
@@ -398,9 +433,12 @@ def spectral_radius(xent, regularizable, projvec_beta=.55):
   xHx = utils.list2dotprod(projvec, hessVecProd)
 
   # comopute next projvec
-  normHv = utils.list2norm(hessVecProd)
-  unitHv = [tf.divide(h, normHv) for h in hessVecProd]
-  nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
+  if args.randvec:
+    nextProjvec = [tf.random_normal(shape=p.get_shape()) for p in projvec]
+  else:
+    normHv = utils.list2norm(hessVecProd)
+    unitHv = [tf.divide(h, normHv) for h in hessVecProd]
+    nextProjvec = [tf.add(h, tf.multiply(p, projvec_beta)) for h,p in zip(unitHv, projvec)]
   normNextPv = utils.list2norm(nextProjvec)
   nextProjvec = [tf.divide(p, normNextPv) for p in nextProjvec]
 
