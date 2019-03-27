@@ -37,6 +37,7 @@ parser.add_argument('-speccoef', default=0, type=float)
 parser.add_argument('-projvec_beta', default=0, type=float)
 parser.add_argument('-warmupStart', default=100, type=int)
 parser.add_argument('-warmupPeriod', default=1000, type=int)
+# sharpfinder
 parser.add_argument('-randvec', action='store_true')
 parser.add_argument('-ngradspec', default=2, type=int)
 # saving and restorin
@@ -113,18 +114,20 @@ class Model:
       specs = []
       self.projvec_op = []
       for i in range(args.ngradspec):
-        spec, projvecop, self.projvec_corr, self.eigvec = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta, i)
+        spec, projvecop, self.projvec_corr, self.eigvec, self.norm_values = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta, i)
         specs.append(spec)
         self.projvec_op.append(projvecop)
       self.spec = tf.add_n(specs) / args.ngradspec
       gradspec = tf.gradients(args.speccoef * self.spec, tf.trainable_variables())
       # gradspec, self.grad_norm = tf.clip_by_global_norm(gradspec, clip_norm=self.args.max_grad_norm)
-      self.gradnorm = tf.global_norm(grads)
       self.gradspecnorm = tf.global_norm(gradspec)
       self.gradspec = gradspec
-      self.grads = grads
-      grads = grads + gradspec
+      grads = [g1 + g2 for g1,g2 in zip(grads, gradspec)]
+    else:
+      self.spec = self.gradspecnorm = self.gradspec = self.norm_values = self.eigvec = self.projvec_op = self.projvec_corr = tf.constant(False)
 
+    self.grads = grads
+    self.gradnorm = tf.global_norm(grads)
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
     # accuracy
@@ -186,8 +189,14 @@ class Model:
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
         metricsop = dict(xent=self.xent, acc=self.acc, spec=self.spec, gradspecnorm=self.gradspecnorm, gradnorm=self.gradnorm)
+        # metricsop = dict(xent=self.xent, acc=self.acc, gradnorm=self.gradnorm)
         metricsgop = [self.grads, self.gradspec]
-        _, _, metrics, metricsg = self.sess.run([self.train_op, self.projvec_op, metricsop, metricsg],
+        # metricsgop = [self.grads]
+        weights = self.sess.run(tf.trainable_variables())
+        filtnorm = self.sess.run(utils.filtnorm(tf.trainable_variables()))
+        ops = [self.train_op, self.projvec_op]
+        # ops = [self.train_op]
+        _, metrics, metricsg, = self.sess.run([ops, metricsop],
                                                   {self.inputs: xbatch,
                                                    self.labels: ybatch,
                                                    self.is_training: True,
@@ -195,22 +204,18 @@ class Model:
                                                    self.speccoef: speccoef,
                                                    })
 
-        def global_norm(vec):
-          return np.sqrt(np.sum([np.sum(p**2) for p in vec]))
+        # def global_norm(vec):
+        #   return np.sqrt(np.sum([np.sum(p**2) for p in vec]))
+        # def global_dotprod(vec1, vec2):
+        #   return np.sum([np.sum(v1*v2) for v1, v2 in zip(vec1, vec2)])
+        # def global_correlation(vec1, vec2):
+        #   return global_dotprod(vec1, vec2) / ( global_norm(vec1) * global_norm(vec2) )
+        # grads, gradspec = metricsg
 
-        def global_dotprod(vec1, vec2):
-          return np.sum([np.sum(v1*v2) for v1, v2 in zip(vec1, vec2)])
+        # if epoch != 0: print(global_norm())
+        # m = metricsg.copy()
 
-        def global_correlation(vec1, vec2):
-          return global_dotprod(vec1, vec2) / ( global_norm(vec1) * global_norm(vec2) )
-
-        grads, gradspec = metricsg
-
-
-        if epoch != 0: print(global_norm())
-        m = metricsg.copy()
-
-      if np.mod(epoch, 100)==0:
+      if np.mod(epoch, 1)==0:
 
         experiment.log_metrics(metrics, step=epoch)
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
@@ -229,22 +234,6 @@ class Model:
           # run several power iterations to get accurate hessian
           spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
           print('spec', spec, '\tprojvec_corr', projvec_corr)
-
-          acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
-          experiment.log_metric('train/xent', xent, epoch)
-          experiment.log_metric('train/acc', acc_train, epoch)
-          experiment.log_metric('clean/xent', xent_clean, epoch)
-          experiment.log_metric('clean/acc', acc_clean, epoch)
-          experiment.log_metric('dirty/xent', xent_dirty, epoch)
-          experiment.log_metric('dirty/acc', acc_dirty, epoch)
-          experiment.log_metric('projvec_corr', projvec_corr, epoch)
-          experiment.log_metric('spec', spec, epoch)
-          experiment.log_metric('distrfrac', distrfrac, epoch)
-
-          bestAcc = max(bestAcc, acc_test)
-          bestXent = min(bestXent, xent_test)
-          # experiment.log_metric('best/acc', bestAcc, epoch)
-          # experiment.log_metric('best/xent', bestXent, epoch)
 
   def get_hessian(self, xdata, ydata):
     '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
@@ -422,6 +411,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
   # layer norm
   # norm_values = utils.layernormdev(regularizable)
   norm_values = utils.filtnorm(regularizable)
+  # norm_values = [tf.ones_like(t) for t in tf.trainable_variables()]
   projvec_mul_normvalues = [tf.multiply(f,p) for f,p in zip(norm_values, projvec)]
 
   # get the hessian-vector product
@@ -450,7 +440,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
     with tf.variable_scope('projvec_op'):
       projvec_op = [tf.assign(p,n) for p,n in zip(projvec, nextProjvec)]
 
-  return xHx, projvec_op, projvec_corr, projvec_mul_normvalues
+  return xHx, projvec_op, projvec_corr, projvec_mul_normvalues, norm_values
 
 if __name__ == '__main__':
 

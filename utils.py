@@ -44,8 +44,9 @@ def filtnorm(trainable_variables):
           f.append(tf.multiply(tf.ones_like(r[:,i]), tf.norm(r[:,i])))
         filtnorm.append(tf.stack(f,axis=1))
       elif len(r.shape)==1: # bn and bias layer
-        # f = tf.multiply(tf.ones_like(r), tf.norm(r)) # do not do any normalization/scaling to bias/bn variables, leave them unscaled
-        f = tf.multiply(tf.zeros_like(r), tf.norm(r)) # zero out bias/bn variables so their curvature doesnt affect hessian and hessreg doesnt affect them
+        f = 1e-6*tf.ones_like(r) # do not do any normalization/scaling to bias/bn variables
+        # f = tf.multiply(tf.ones_like(r), tf.norm(r)) # normalize bias/bn just the same
+        # f = tf.multiply(tf.zeros_like(r), tf.norm(r)) # zero out bias/bn variables so their curvature doesnt affect hessian and hessreg doesnt affect them
         filtnorm.append(f)
       else:
         print('invalid number of dimensions in layer, should be 1, 2, or 4')
