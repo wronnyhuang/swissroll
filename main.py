@@ -58,7 +58,7 @@ parser.add_argument('-batchsize', default=None, type=int)
 parser.add_argument('-ndim', default=2, type=int)
 parser.add_argument('-nclass', default=1, type=int)
 parser.add_argument('-ndata', default=400, type=int)
-parser.add_argument('-max_grad_norm', default=10, type=float)
+parser.add_argument('-max_grad_norm', default=2, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
@@ -187,6 +187,7 @@ class Model:
         xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
+        tic = time()
         metrics = dict(xent=self.xent, acc=self.acc, spec=self.spec, )
         ops = [self.train_op, self.projvec_op]
         _, metrics, = self.sess.run([ops, metrics],
@@ -196,12 +197,9 @@ class Model:
                                                    self.lr: lr,
                                                    self.speccoef: speccoef,
                                                    })
-        _, spec, = self.sess.run([self.projvec_op, self.spec],
-                                    {self.inputs: xbatch,
-                                     self.labels: ybatch,
-                                     })
 
-      if np.mod(epoch, 2)==0:
+
+      if np.mod(epoch, 5)==0:
 
         experiment.log_metrics(metrics, step=epoch)
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
@@ -210,10 +208,12 @@ class Model:
         xent_test, acc_test = self.evaluate(xtest, ytest)
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
+        experiment.log_metric('sigopt', -acc_test - (1-acc)**6, epoch)
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
 
         experiment.log_metric('lr', lr, epoch)
         experiment.log_metric('speccoef', speccoef, epoch)
+        experiment.log_metrics('titer', time()-tic, epoch)
 
         # if args.speccoef == 0:
         #   # run several power iterations to get accurate hessian
@@ -429,7 +429,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
 
 if __name__ == '__main__':
 
-  args.speccoef = 10**args.speccoeflog
+  args.speccoef = -10**args.speccoeflog
   args.lr = 10**args.lrlog
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
                           project_name='swissroll'+args.tag, workspace="wronnyhuang")

@@ -24,7 +24,7 @@ def evaluate_model(assignment, gpu, name):
             ' -noise=1 ' + \
             ' -distrfrac=0 ' + \
             ' -randvec' + \
-            ' -tag=sigopt' + \
+            ' -tag=-sharpmin-sigopt ' + \
             ' '.join(['-' + k +'=' + str(v) for k,v in assignment.items()])
   if args.debug: command = command + ' -nepoch=1000'
   print(command)
@@ -37,11 +37,8 @@ def evaluate_model(assignment, gpu, name):
   metricSummaries = cometapi.get_raw_metric_summaries(exptKey)
   metricSummaries = {b.pop('name'): b for b in metricSummaries}
   # value = metricSummaries['text/xent']['valueMin'] # xent
-  acctest = cometapi.get_metrics(exptKey)['test/acc']['value'].iloc[-20:].mean()
-  acctrain = cometapi.get_metrics(exptKey)['acc']['value'].iloc[-20:].mean()
-  acctest = float(acctest)
-  acctrain = float(acctrain)
-  value = -acctest-(1-acctrain)**4
+  value = cometapi.get_metrics(exptKey)['sigopt']['value'].iloc[-20:].mean()
+  value = float(value)
   # value = 1/value
   print('sigoptObservation=' + str(value))
   return value # optimization metric
@@ -49,14 +46,14 @@ def evaluate_model(assignment, gpu, name):
 api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 
 parameters = [
-              dict(name='lrlog', type='double', default_value=-2, bounds=dict(min=-4, max=-1)),
+              dict(name='lrlog', type='double', default_value=-2, bounds=dict(min=-5, max=-1)),
               dict(name='lrstep', type='int', default_value=600,  bounds=dict(min=500, max=3000)),
               dict(name='lrstep2', type='int', default_value=6000,  bounds=dict(min=3000, max=7000)),
               # dict(name='distrfrac', type='double', default_value=.6,  bounds=dict(min=.01, max=1)),
               # dict(name='distrstep', type='int', default_value=9000,  bounds=dict(min=5000, max=15000)),
               # dict(name='distrstep2', type='int', default_value=17000,  bounds=dict(min=15000, max=20000)),
               # dict(name='wdeccoef', type='double', default_value=2e-3,  bounds=dict(min=0, max=1e-1)),
-              dict(name='speccoeflog', type='double', default_value=-3, bounds=dict(min=-5, max=-1)),
+              dict(name='speccoeflog', type='double', default_value=-3, bounds=dict(min=-6, max=-1)),
               dict(name='warmupPeriod', type='int', default_value=1000, bounds=dict(min=200, max=2000)),
               dict(name='warmupStart', type='int', default_value=800, bounds=dict(min=500, max=6000)),
               # dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
