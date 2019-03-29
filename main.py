@@ -22,29 +22,31 @@ parser.add_argument('-noise', default=1, type=float)
 parser.add_argument('-tag', default='', type=str)
 # lr and schedule
 parser.add_argument('-lr', default=.0067, type=float)
-parser.add_argument('-lrstep', default=3000, type=int)
-parser.add_argument('-lrstep2', default=6452, type=int)
+parser.add_argument('-lrlog', default=-2, type=float)
+parser.add_argument('-lrstep', default=600, type=int)
+parser.add_argument('-lrstep2', default=3000, type=int)
 parser.add_argument('-lrstep3', default=1e9, type=int)
-parser.add_argument('-nepoch', default=20000, type=int)
+parser.add_argument('-nepoch', default=10000, type=int)
 # poisoning
 parser.add_argument('-perfect', action='store_true')
-parser.add_argument('-distrfrac', default=.55, type=float)
+parser.add_argument('-distrfrac', default=0, type=float)
 parser.add_argument('-distrstep', default=8812, type=int)
 parser.add_argument('-distrstep2', default=18142, type=int)
 # regularizers
 parser.add_argument('-wdeccoef', default=0, type=float)
 parser.add_argument('-speccoef', default=0, type=float)
+parser.add_argument('-speccoeflog', default=-2, type=float)
 parser.add_argument('-projvec_beta', default=0, type=float)
-parser.add_argument('-warmupStart', default=100, type=int)
+parser.add_argument('-warmupStart', default=800, type=int)
 parser.add_argument('-warmupPeriod', default=1000, type=int)
 # sharpfinder
 parser.add_argument('-randvec', action='store_true')
-parser.add_argument('-ngradspec', default=2, type=int)
+parser.add_argument('-ngradspec', default=300, type=int)
 # saving and restorin
 parser.add_argument('-save', action='store_true')
 parser.add_argument('-pretrain_dir', default=None, type=str)
 # hidden hps
-parser.add_argument('-nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
+parser.add_argument('-nhidden', default=[10,10,10,10,10,10], type=int, nargs='+')
 parser.add_argument('-nhidden1', default=8, type=int)
 parser.add_argument('-nhidden2', default=14, type=int)
 parser.add_argument('-nhidden3', default=20, type=int)
@@ -56,7 +58,7 @@ parser.add_argument('-batchsize', default=None, type=int)
 parser.add_argument('-ndim', default=2, type=int)
 parser.add_argument('-nclass', default=1, type=int)
 parser.add_argument('-ndata', default=400, type=int)
-parser.add_argument('-max_grad_norm', default=8, type=float)
+parser.add_argument('-max_grad_norm', default=10, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
@@ -101,7 +103,7 @@ class Model:
     xent = tf.nn.sigmoid_cross_entropy_with_logits(labels=self.labels, logits=logits)
     self.xent = tf.reduce_mean(xent)
 
-    # weight decay and hessian reg
+    # weight decay
     regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
     wdec = tf.global_norm(regularizable)**2
     self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
@@ -114,19 +116,17 @@ class Model:
       specs = []
       self.projvec_op = []
       for i in range(args.ngradspec):
+        print('creating curvature graph '+str(i))
         spec, projvecop, self.projvec_corr, self.eigvec, self.norm_values = spectral_radius(self.xent, tf.trainable_variables(), self.args.projvec_beta, i)
         specs.append(spec)
         self.projvec_op.append(projvecop)
       self.spec = tf.add_n(specs) / args.ngradspec
-      gradspec = tf.gradients(args.speccoef * self.spec, tf.trainable_variables())
-      # gradspec, self.grad_norm = tf.clip_by_global_norm(gradspec, clip_norm=self.args.max_grad_norm)
-      self.gradspecnorm = tf.global_norm(gradspec)
-      self.gradspec = gradspec
-      grads = [g1 + g2 for g1,g2 in zip(grads, gradspec)]
+      gradspec = tf.gradients(self.spec, tf.trainable_variables())
+      gradspec, self.gradspecnorm = tf.clip_by_global_norm(gradspec, clip_norm=self.args.max_grad_norm)
+      grads = [g1 + self.speccoef * g2 for g1,g2 in zip(grads, gradspec)]
     else:
       self.spec = self.gradspecnorm = self.gradspec = self.norm_values = self.eigvec = self.projvec_op = self.projvec_corr = tf.constant(False)
 
-    self.grads = grads
     self.gradnorm = tf.global_norm(grads)
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
 
@@ -155,7 +155,6 @@ class Model:
     '''fit the model to the data'''
 
     nbatch = len(xtrain)//self.args.batchsize
-    bestAcc, bestXent = 0, 20
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
@@ -188,39 +187,25 @@ class Model:
         xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
-        metricsop = dict(xent=self.xent, acc=self.acc, spec=self.spec, gradspecnorm=self.gradspecnorm, gradnorm=self.gradnorm)
-        # metricsop = dict(xent=self.xent, acc=self.acc, gradnorm=self.gradnorm)
-        metricsgop = [self.grads, self.gradspec]
-        # metricsgop = [self.grads]
-        weights = self.sess.run(tf.trainable_variables())
-        filtnorm = self.sess.run(utils.filtnorm(tf.trainable_variables()))
+        metrics = dict(xent=self.xent, acc=self.acc, spec=self.spec, )
         ops = [self.train_op, self.projvec_op]
-        # ops = [self.train_op]
-        _, metrics, metricsg, = self.sess.run([ops, metricsop],
+        _, metrics, = self.sess.run([ops, metrics],
                                                   {self.inputs: xbatch,
                                                    self.labels: ybatch,
                                                    self.is_training: True,
                                                    self.lr: lr,
                                                    self.speccoef: speccoef,
                                                    })
+        _, spec, = self.sess.run([self.projvec_op, self.spec],
+                                    {self.inputs: xbatch,
+                                     self.labels: ybatch,
+                                     })
 
-        # def global_norm(vec):
-        #   return np.sqrt(np.sum([np.sum(p**2) for p in vec]))
-        # def global_dotprod(vec1, vec2):
-        #   return np.sum([np.sum(v1*v2) for v1, v2 in zip(vec1, vec2)])
-        # def global_correlation(vec1, vec2):
-        #   return global_dotprod(vec1, vec2) / ( global_norm(vec1) * global_norm(vec2) )
-        # grads, gradspec = metricsg
-
-        # if epoch != 0: print(global_norm())
-        # m = metricsg.copy()
-
-      if np.mod(epoch, 1)==0:
+      if np.mod(epoch, 2)==0:
 
         experiment.log_metrics(metrics, step=epoch)
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
-              '\tspec = ' + str(metrics['spec']) + '\tgradnorm = ' + str(metrics['gradnorm'])
-              + '\tgradspecnorm = ' + str(metrics['gradspecnorm']))
+              '\tspectrain = ' + str(metrics['spec']) + '\tspec = ' + str(spec))
 
         xent_test, acc_test = self.evaluate(xtest, ytest)
         experiment.log_metric('test/xent', xent_test, epoch)
@@ -230,10 +215,10 @@ class Model:
         experiment.log_metric('lr', lr, epoch)
         experiment.log_metric('speccoef', speccoef, epoch)
 
-        if args.speccoef == 0:
-          # run several power iterations to get accurate hessian
-          spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
-          print('spec', spec, '\tprojvec_corr', projvec_corr)
+        # if args.speccoef == 0:
+        #   # run several power iterations to get accurate hessian
+        #   spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
+        #   print('spec', spec, '\tprojvec_corr', projvec_corr)
 
   def get_hessian(self, xdata, ydata):
     '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
@@ -444,6 +429,8 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
 
 if __name__ == '__main__':
 
+  args.speccoef = 10**args.speccoeflog
+  args.lr = 10**args.lrlog
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
                           project_name='swissroll'+args.tag, workspace="wronnyhuang")
   home = os.environ['HOME']
