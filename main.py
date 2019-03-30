@@ -197,13 +197,11 @@ class Model:
                                                    self.lr: lr,
                                                    self.speccoef: speccoef,
                                                    })
-
-
       if np.mod(epoch, 5)==0:
 
         experiment.log_metrics(metrics, step=epoch)
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
-              '\tspectrain = ' + str(metrics['spec']) + '\tspec = ' + str(spec))
+              '\tspectrain = ' + str(metrics['spec']))
 
         xent_test, acc_test = self.evaluate(xtest, ytest)
         experiment.log_metric('test/xent', xent_test, epoch)
