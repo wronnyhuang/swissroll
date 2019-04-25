@@ -57,7 +57,7 @@ parser.add_argument('-nhidden6', default=32, type=int)
 parser.add_argument('-batchsize', default=None, type=int)
 parser.add_argument('-ndim', default=2, type=int)
 parser.add_argument('-nclass', default=1, type=int)
-parser.add_argument('-ndata', default=400, type=int)
+parser.add_argument('-ndata', default=200, type=int)
 parser.add_argument('-max_grad_norm', default=2, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
@@ -204,14 +204,15 @@ class Model:
               '\tspectrain = ' + str(metrics['spec']))
 
         xent_test, acc_test = self.evaluate(xtest, ytest)
+        acc = metrics['acc']
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
-        experiment.log_metric('sigopt', -acc_test - (1-acc)**6, epoch)
+        experiment.log_metric('sigopt', -acc_test - (1-acc)**4, epoch)
         print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
 
         experiment.log_metric('lr', lr, epoch)
         experiment.log_metric('speccoef', speccoef, epoch)
-        experiment.log_metrics('titer', time()-tic, epoch)
+        experiment.log_metric('titer', time()-tic, epoch)
 
         # if args.speccoef == 0:
         #   # run several power iterations to get accurate hessian
