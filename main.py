@@ -57,7 +57,7 @@ parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
-parser.add_argument('-nspan', default=100, type=int)
+parser.add_argument('-nspan', default=256, type=int)
 parser.add_argument('-along', default='random', type=str)
 args = parser.parse_args()
 
@@ -322,10 +322,10 @@ class Model:
         spec = np.zeros([len(cfeed)] * 2)
         weights = self.sess.run(tf.trainable_variables())
         for i, c1 in enumerate(cfeed):
-            tf.reset_default_graph()
-            model = Model(args)
             for j, c2 in enumerate(cfeed):
-
+                if j%50 == 0:
+                    tf.reset_default_graph()
+                    model = Model(args)
                 # perturb the weights
                 perturbedWeights = [
                     w + c1 * d1 + c2 * d2 for w, d1, d2 in zip(weights,
