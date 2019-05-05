@@ -18,7 +18,7 @@ from time import time, sleep
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('-gpu', default=0, type=int)
 parser.add_argument('-sugg', default='debug', type=str)
-parser.add_argument('-noise', default=1, type=float)
+parser.add_argument('-noise', default=0.3, type=float)
 parser.add_argument('-tag', default='', type=str)
 # lr and schedule
 parser.add_argument('-lr', default=.0067, type=float)
@@ -26,7 +26,7 @@ parser.add_argument('-lrlog', default=-2, type=float)
 parser.add_argument('-lrstep', default=600, type=int)
 parser.add_argument('-lrstep2', default=3000, type=int)
 parser.add_argument('-lrstep3', default=1e9, type=int)
-parser.add_argument('-nepoch', default=10000, type=int)
+parser.add_argument('-nepoch', default=1000, type=int)
 # poisoning
 parser.add_argument('-perfect', action='store_true')
 parser.add_argument('-distrfrac', default=0, type=float)
@@ -57,11 +57,11 @@ parser.add_argument('-nhidden6', default=32, type=int)
 parser.add_argument('-batchsize', default=None, type=int)
 parser.add_argument('-ndim', default=2, type=int)
 parser.add_argument('-nclass', default=1, type=int)
-parser.add_argument('-ndata', default=200, type=int)
+parser.add_argument('-ndata', default=400, type=int)
 parser.add_argument('-max_grad_norm', default=2, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
-parser.add_argument('-wiggle', action='store_true')
+parser.add_argument('-mode', default='fit', type=str, help='fit, wiggle, or plot')
 parser.add_argument('-saveplotdata', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
 parser.add_argument('-nspan', default=100, type=int)
@@ -243,7 +243,7 @@ class Model:
     yinfer[yinfer <= .5] = 0
     return yinfer
 
-  def plot(self, xtrain, ytrain, xtest=None, ytest=None, name='plot.jpg', plttitle='plot', index=0):
+  def plot_large(self, xtrain, ytrain, xtest=None, ytest=None, name='plot.jpg', plttitle='plot', index=0):
     '''plot decision boundary alongside loss surface'''
 
     # make contour of decision boundary
@@ -312,9 +312,12 @@ class Model:
     # image metadata and save image
     os.makedirs(join(logdir, 'images'), exist_ok=True)
     savefig(join(logdir, 'images', name))
-    if name=='plot.jpg': experiment.log_image(join(logdir, 'images/plot.jpg')); os.remove(join(logdir, 'images/plot.jpg'))
+    if name=='plot.jpg':
+      print(experiment.log_image(join(logdir, 'images/plot.jpg'))['web'])
+      os.remove(join(logdir, 'images/plot.jpg'))
     sleep(.1)
     close('all')
+    
 
   def wiggle(self, xdata, ydata, span=1, along='random'):
     '''perturb weights and plot the decision boundary at each step, also get loss surface'''
@@ -344,7 +347,7 @@ class Model:
 
       # visualize what happens to decision boundary when weights are wiggled
       self.assign_weights(perturbedWeights)
-      if exists(join(logdir,'surface.pkl')): self.plot(xdata, ydata, name=str(i/1000)+'.jpg', plttitle=format(c,'.3f'), index=i)
+      if exists(join(logdir, 'surface.pkl')): self.plot_large(xdata, ydata, name=str(i/1000)+'.jpg', plttitle=format(c,'.3f'), index=i)
 
       # compute the loss surface
       # xent[i], acc[i] = self.evaluate(xdata, ydata)
@@ -366,12 +369,14 @@ class Model:
       pickle.dump((cfeed, xent, acc, spec), f)
       experiment.log_asset(join(logdir, 'surface.pkl'))
 
+  
   def assign_weights(self, weights):
     self.sess.run([tf.assign(t,w) for t,w in zip(tf.trainable_variables(), weights)])
 
   def save(self):
     '''save model'''
-    ckpt_state = tf.train.get_checkpoint_state(logdir)
+    self.state = tf.train.get_checkpoint_state(logdir)
+    ckpt_state = self.state
     ckpt_file = join(logdir, 'model.ckpt')
     print('Saving model to '+ckpt_file)
     saver = tf.train.Saver(max_to_keep=1)
@@ -428,7 +433,6 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
 
 if __name__ == '__main__':
 
-  args.speccoef = -10**args.speccoeflog
   args.lr = 10**args.lrlog
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
                           project_name='swissroll'+args.tag, workspace="wronnyhuang")
@@ -459,10 +463,10 @@ if __name__ == '__main__':
 
   # make model
   model = Model(args)
-  if args.wiggle:
+  if args.mode == 'wiggle':
     model.wiggle(xtrain, ytrain, args.span, args.along)
-  else:
+  elif args.mode == 'fit':
     model.fit(xtrain, ytrain, xtest, ytest)
-    model.plot(xtrain, ytrain)
+    model.plot_large(xtrain, ytrain)
     if args.save: model.save()
   print('done!')
