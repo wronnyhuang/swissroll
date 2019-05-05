@@ -339,7 +339,7 @@ class Model:
                 #          plttitle=format(c, '.3f'), index=i)
 
                 # compute the loss surface
-                wiggle_data.update({f"weights{i}{j}": perturbedWeights})
+                wiggle_data.update({f"weights_{i}_{j}": perturbedWeights})
                 xent[i, j], acc[i, j] = model.evaluate(xdata, ydata)
                 print(xent[i][j])
 
