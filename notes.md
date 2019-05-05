@@ -81,40 +81,7 @@ where beta is the new speccoef. This is eseentially encouraging the difference i
 
 ![img](http://www.sciweavers.org/tex2img.php?eq=L_%5CDelta%20%3D%201%2Fm%5Csum_%7Bi%3D1%7D%5Ek%20L%28D%2C%20%5Ctheta%2B%5CDelta_i%20%29&bc=White&fc=Black&im=jpg&fs=12&ff=arev&edit=0)
 
-## Poisoning approach to finding good/bad minima
-- To find bad minima, poison the dataset with lots of examples with their labels flipped. 
-- Must have a way to get labeled examples outside the training set. IF you have the data distribution, then you can just sample from the distribution.
 
-**Results** Not bad at all. Got 80% generalization gap (lower than random chance) and 100% train accuracy. Using the same network, if we dont label flip, then the gen gap is 20%
-The spectral radius was 4000 (with poisoning) or 300 (without poisoning)
-
-W/o poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/f003b458afe94c2388b668ed9fba3579/metrics
-
-W/ poisoning https://www.comet.ml/wronnyhuang/sharpmin-spiral/ec5b03a1550440b89381b3d4bf0df044/metrics
-
-### reproducing the bad minima now two months later
-
-same hyperparams as the previous link. got the same results--good!
-https://www.comet.ml/wronnyhuang/swissroll/e6d6c17ef9b14687a0dbd11a34d5ebc5
-
-with less noise (0.5)
-https://www.comet.ml/wronnyhuang/swissroll/fe3ec917b4c74547991acbb1c3e6cfe5
-
-## Loss surface and decision boundary
-
-Here we have 3 canonical networks, all with the same architecture, just different weights
-- poison: the network is a maximally bad generalizer. used dirty data drawn from distribution with flipped label
-- clean: no dirty data, just plain old weight decay
-- perfect: same as poison, except now the data drawn from the distribution has the correct labels. it's a "perfect" generalizer
-
-poison-opt
-https://www.comet.ml/wronnyhuang/swissroll/aeeb8d4e12f94da3a412640002b74ef2/images
-
-cleanwdec-opt
-https://www.comet.ml/wronnyhuang/swissroll/f982e9341b3746ccb56b1e26c22a69d4/images
-
-perfect
-https://www.comet.ml/wronnyhuang/swissroll/9f4f4cd19cf245aa8321e66580dc9c7f/images
 
 
 
