@@ -347,14 +347,14 @@ class Model:
                 #    self.get_hessian(xtrain, ytrain)
 
                 print('progress:', i * len(cfeed) + j + 1, 'of', len(cfeed)**2)
-        cfeed, cfeed = np.meshgrid(cfeed, cfeed)
-        wiggle_data.update({"X": cfeed, "Y": cfeed, "xent": xent, "acc": acc})
+        X, Y = np.meshgrid(cfeed, cfeed)
+        wiggle_data.update({"X": X, "Y": Y, "xent": xent, "acc": acc})
         pickle_out = open(os.path.join(logdir, "wiggle_data.pickle"), "wb")
         pickle.dump(wiggle_data, pickle_out)
         pickle_out.close()
         fig = plt.figure(figsize=(15, 15))
         ax = fig.add_subplot(111, projection='3d')
-        ax.plot_wireframe(cfeed, cfeed, xent)
+        ax.plot_wireframe(X, Y, xent)
         #plt.show()
         plt.savefig(fname=os.path.join('./', 'xent'))
         # make gif or save surface
