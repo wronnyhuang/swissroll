@@ -132,8 +132,8 @@ class Model:
 
     # accuracy
     self.predictions = tf.sigmoid(logits)
-    equal = tf.equal(self.labels, tf.round(self.predictions))
-    self.acc = tf.reduce_mean(tf.to_float(equal))
+    self.equal = tf.equal(self.labels, tf.round(self.predictions))
+    self.acc = tf.reduce_mean(tf.to_float(self.equal))
 
   def setupTF(self):
     '''setup the tf session and load pretrained model if desired'''
@@ -188,7 +188,7 @@ class Model:
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
         tic = time()
-        metrics = dict(xent=self.xent, acc=self.acc, spec=self.spec, )
+        metrics = dict(xent=self.xent, acc=self.acc, spec=self.spec, equal=self.equal)
         ops = [self.train_op, self.projvec_op]
         _, metrics, = self.sess.run([ops, metrics],
                                                   {self.inputs: xbatch,
@@ -197,8 +197,9 @@ class Model:
                                                    self.lr: lr,
                                                    self.speccoef: speccoef,
                                                    })
-      if np.mod(epoch, 5)==0:
-
+      if np.mod(epoch, 200)==0:
+  
+        metrics['acc'] = np.mean(metrics.pop('equal')[b:b + self.args.batchsize, 0])
         experiment.log_metrics(metrics, step=epoch)
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(metrics['xent']) + '\tacc=' + str(metrics['acc']) +
               '\tspectrain = ' + str(metrics['spec']))
@@ -428,8 +429,8 @@ def spectral_radius(xent, regularizable, projvec_beta=.55, iter=0):
 
 if __name__ == '__main__':
 
-  args.speccoef = -10**args.speccoeflog
-  args.lr = 10**args.lrlog
+  # args.speccoef = -10**args.speccoeflog
+  # args.lr = 10**args.lrlog
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
                           project_name='swissroll'+args.tag, workspace="wronnyhuang")
   home = os.environ['HOME']
