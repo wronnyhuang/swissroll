@@ -21,10 +21,8 @@ def evaluate_model(assignment, gpu, name):
   command = 'python main.py' + \
             ' -gpu=' + str(gpu) + \
             ' -sugg=' + name + ' ' + \
-            ' -noise=1 ' + \
-            ' -distrfrac=0 ' + \
-            ' -randvec' + \
-            ' -tag=-sharpmin-sigopt ' + \
+            ' -noise=.5 ' + \
+            ' -tag=-secondpoison ' + \
             ' '.join(['-' + k +'=' + str(v) for k,v in assignment.items()])
   if args.debug: command = command + ' -nepoch=1000'
   print(command)
@@ -46,23 +44,22 @@ def evaluate_model(assignment, gpu, name):
 api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 
 parameters = [
-              dict(name='lrlog', type='double', default_value=-2, bounds=dict(min=-5, max=-1)),
-              dict(name='lrstep', type='int', default_value=600,  bounds=dict(min=500, max=3000)),
-              dict(name='lrstep2', type='int', default_value=6000,  bounds=dict(min=3000, max=7000)),
-              # dict(name='distrfrac', type='double', default_value=.6,  bounds=dict(min=.01, max=1)),
-              # dict(name='distrstep', type='int', default_value=9000,  bounds=dict(min=5000, max=15000)),
-              # dict(name='distrstep2', type='int', default_value=17000,  bounds=dict(min=15000, max=20000)),
-              # dict(name='wdeccoef', type='double', default_value=2e-3,  bounds=dict(min=0, max=1e-1)),
-              dict(name='speccoeflog', type='double', default_value=-3, bounds=dict(min=-6, max=-1)),
-              dict(name='warmupPeriod', type='int', default_value=1000, bounds=dict(min=200, max=2000)),
-              dict(name='warmupStart', type='int', default_value=800, bounds=dict(min=500, max=6000)),
+              dict(name='lrlog', type='double', default_value=-3, bounds=dict(min=-5, max=-1)),
+              dict(name='lrstep', type='int', default_value=1000,  bounds=dict(min=500, max=5000)),
+              dict(name='lrstep2', type='int', default_value=6000,  bounds=dict(min=5000, max=13000)),
+              dict(name='distrfrac', type='double', default_value=.6,  bounds=dict(min=.03, max=.7)),
+              dict(name='distrstep', type='int', default_value=9000,  bounds=dict(min=5000, max=15000)),
+              dict(name='distrstep2', type='int', default_value=17000,  bounds=dict(min=15000, max=20000)),
+              # dict(name='speccoeflog', type='double', default_value=-3, bounds=dict(min=-6, max=-1)),
+              # dict(name='warmupPeriod', type='int', default_value=1000, bounds=dict(min=200, max=2000)),
+              # dict(name='warmupStart', type='int', default_value=800, bounds=dict(min=500, max=6000)),
               # dict(name='projvec_beta', type='double', default_value=.9, bounds=dict(min=0, max=.99)),
-              # dict(name='nhidden1', type='int', default_value=10,  bounds=dict(min=4, max=32)),
-              # dict(name='nhidden2', type='int', default_value=10, bounds=dict(min=4, max=32)),
-              # dict(name='nhidden3', type='int', default_value=10, bounds=dict(min=4, max=32)),
-              # dict(name='nhidden4', type='int', default_value=10, bounds=dict(min=4, max=32)),
-              # dict(name='nhidden5', type='int', default_value=10, bounds=dict(min=4, max=32)),
-              # dict(name='nhidden6', type='int', default_value=10, bounds=dict(min=4, max=32)),
+              dict(name='nhidden1', type='int', default_value=10,  bounds=dict(min=4, max=32)),
+              dict(name='nhidden2', type='int', default_value=10, bounds=dict(min=4, max=32)),
+              dict(name='nhidden3', type='int', default_value=10, bounds=dict(min=4, max=32)),
+              dict(name='nhidden4', type='int', default_value=10, bounds=dict(min=4, max=32)),
+              dict(name='nhidden5', type='int', default_value=10, bounds=dict(min=4, max=32)),
+              dict(name='nhidden6', type='int', default_value=10, bounds=dict(min=4, max=32)),
               ]
 
 exptDetail = dict(name=args.name, parameters=parameters, observation_budget=300,

@@ -72,15 +72,16 @@ class Worker(threading.Thread):
       try:
         value = self.evalfun(assignment=suggestion.assignments, gpu=self.gpu, name=self.name+'-'+str(suggestion.id))
         failed = False
+        # print('success ' + self.name+'-'+str(suggestion.id) + ' value = ' + str(value))
       except Exception:
         value = None
         failed = True
+        # print('failed ' + self.name+'-'+str(suggestion.id))
       self.conn.experiments(self.exptId).observations().create(suggestion=suggestion.id,
                                                                value=value,
                                                                failed=failed,
                                                                metadata=self.metadata,
                                                                )
-      print(self.metadata, 'failed='+str(failed))
 
 def get_expt_ids():
   return conn.clients(client_id).plan().fetch().current_period.experiments

@@ -6,6 +6,8 @@ from shutil import rmtree
 import subprocess
 import numpy as np
 from cometml_api import api as cometapi
+import tensorflow as tf
+from time import sleep
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--name', default='unnamed-sigopt', type=str)
@@ -21,24 +23,31 @@ def evaluate_model(assignment, gpu, name):
   command = 'python main.py' + \
             ' --gpu=' + str(gpu) + \
             ' --sugg=' + name + ' ' + \
-            ' --noise=1 ' + \
             ' '.join(['--' + k +'=' + str(v) for k,v in assignment.items()])
   if args.debug: command = command + ' --nepoch=51'
   print(command)
   output = subprocess.run(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8')
 
-  # retrieve best evaluation result
-  cometapi.set_api_key('W2gBYYtc8ZbGyyNct5qYGR2Gl')
-  exptKey = open('/root/ckpt/sharpmin-spiral/'+name+'/comet_expt_key.txt', 'r').read()
-  metricSummaries = cometapi.get_raw_metric_summaries(exptKey)
-  metricSummaries = {b.pop('name'): b for b in metricSummaries}
-  # value = metricSummaries['t/xent']['valueMin'] # xent
-  value = cometapi.get_metrics(exptKey)['gen_gap_t']['value'].iloc[-10:].median() # gen_gap
-  value = float(value)
-  # value = 1/value
-  value = min(1e10, value)
-  print('sigoptObservation=' + str(value))
-  return value # optimization metric
+  tries = 1
+  while True:
+    try:
+      # retrieve best evaluation result
+      cometapi.set_api_key('W2gBYYtc8ZbGyyNct5qYGR2Gl')
+      exptKey = open('/root/ckpt/sharpmin-spiral/'+name+'/comet_expt_key.txt', 'r').read()
+      metricSummaries = cometapi.get_raw_metric_summaries(exptKey)
+      metricSummaries = {b.pop('name'): b for b in metricSummaries}
+      # value = metricSummaries['t/xent']['valueMin'] # xent
+      value = cometapi.get_metrics(exptKey)['gen_gap_t']['value'].iloc[-20:].mean() # gen_gap
+      value = float(value)
+      # value = 1/value
+      value = min(1e10, value)
+      print('SUCCESS, sigoptObservation=' + str(value) + ', tries=' + str(tries) + ', https://www.comet.ml/wronnyhuang/sharpmin-spiral-3/' + exptKey)
+      return value # optimization metric
+    except:
+      if tries == 100: break
+      tries += 1
+      sleep(2)
+  print('FAILED ' + ', https://www.comet.ml/wronnyhuang/sharpmin-spiral-3/' + exptKey + '\n' + output.stdout[-1000:])
 
 api_key = 'FJUVRFEZUNYVIMTPCJLSGKOSDNSNTFSDITMBVMZRKZRRVREL'
 
