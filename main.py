@@ -13,7 +13,7 @@ import argparse
 import utils
 
 experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                        project_name='sharpmin-spiral-3', workspace="wronnyhuang")
+                        project_name='sharpmin-spiral', workspace="wronnyhuang")
 
 home = os.environ['HOME']
 tf.reset_default_graph()
@@ -21,13 +21,13 @@ tf.reset_default_graph()
 parser = argparse.ArgumentParser(description='model')
 parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='debug', type=str)
-parser.add_argument('--noise', default=.6, type=float)
+parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
 parser.add_argument('--lr', default=.0079, type=float)
 parser.add_argument('--lrstep', default=3000, type=int)
 parser.add_argument('--lrstep2', default=6452, type=int)
 parser.add_argument('--lrstep3', default=1e9, type=int)
-parser.add_argument('--nepoch', default=25000, type=int)
+parser.add_argument('--nepoch', default=20000, type=int)
 # antilearning
 parser.add_argument('--distrfrac', default=0, type=float)
 parser.add_argument('--distrstep', default=8812, type=int)
@@ -61,14 +61,14 @@ if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
 experiment.log_multiple_params(vars(args))
 
 os.environ['CUDA_VISIBLE_DEVICES'] = str(args.gpu)
-np.random.seed(1235)
+np.random.seed(1234)
 tf.set_random_seed(1234)
 
 def twospirals(n_points, noise=.5):
     """
      Returns the two spirals dataset.
     """
-    n = np.sqrt(np.random.rand(n_points,1)) * 600 * (2*np.pi)/360
+    n = np.sqrt(np.random.rand(n_points,1)) * 780 * (2*np.pi)/360
     d1x = -1.5*np.cos(n)*n + np.random.randn(n_points,1) * noise
     d1y =  1.5*np.sin(n)*n + np.random.randn(n_points,1) * noise
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
@@ -143,8 +143,7 @@ class Model:
     # weight decay and hessian reg
     regularizable = [t for t in tf.trainable_variables() if t.op.name.find('bias')==-1]
     wdec = tf.global_norm(regularizable)**2
-    # self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable, self.args.projvec_beta)
-    self.spec = self.projvec_op = self.projvec_corr = tf.constant(False)
+    self.spec, self.projvec_op, self.projvec_corr = spectral_radius(self.xent, regularizable, self.args.projvec_beta)
     self.loss = self.xent + self.args.wdeccoef*wdec # + self.speccoef*self.spec
 
     # gradient operations
@@ -208,10 +207,10 @@ class Model:
       if np.mod(epoch, 50)==0:
 
         # run several power iterations to get accurate hessian
-        for i in range(1):
+        for i in range(10):
           acc_t, xent_t, spec, _, projvec_corr = self.sess.run([self.acc, self.xent, self.spec, self.projvec_op, self.projvec_corr],
                                                                {self.inputs: xtrain, self.labels: ytrain, self.speccoef: speccoef})
-          # print('iter', i, '\tspec', spec, '\tprojvec_corr', projvec_corr)
+          print('iter', i, '\tspec', spec, '\tprojvec_corr', projvec_corr)
         acc_d, xent_d = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
         print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
@@ -221,7 +220,7 @@ class Model:
         experiment.log_metric('d/xent', xent_d, epoch)
         experiment.log_metric('d/acc', acc_d, epoch)
         # experiment.log_metric('projvec_corr', projvec_corr, epoch)
-        # experiment.log_metric('spec', spec, epoch)
+        experiment.log_metric('spec', spec, epoch)
         # experiment.log_metric('speccoef', speccoef, epoch)
         experiment.log_metric('grad_norm', grad_norm, epoch)
         experiment.log_metric('lr', lr, epoch)
@@ -261,11 +260,11 @@ class Model:
     contourf(xx1, xx2, yy, alpha=.8)
     plot(xtrain[ytrain.ravel()==0,0], xtrain[ytrain.ravel()==0,1], 'b.', label='train 1')
     plot(xtrain[ytrain.ravel()==1,0], xtrain[ytrain.ravel()==1,1], 'r.', label='train 2')
-    # plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
-    # plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
+    plot(xtest[ytest.ravel()==0,0], xtest[ytest.ravel()==0,1], 'bx', label='test 1')
+    plot(xtest[ytest.ravel()==1,0], xtest[ytest.ravel()==1,1], 'rx', label='test 2')
     legend(); colorbar();
     savefig(join(logdir, 'plot.jpg'))
-    print(experiment.log_image(join(logdir, 'plot.jpg'))['web'])
+    experiment.log_image(join(logdir, 'plot.jpg'))
     # show()
 
 
