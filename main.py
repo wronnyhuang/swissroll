@@ -23,17 +23,17 @@ parser.add_argument('--gpu', default=0, type=int)
 parser.add_argument('--sugg', default='debug', type=str)
 parser.add_argument('--noise', default=2, type=float)
 # lr and schedule
-parser.add_argument('--lr', default=.0079, type=float)
+parser.add_argument('--lr', default=.0067, type=float)
 parser.add_argument('--lrstep', default=3000, type=int)
 parser.add_argument('--lrstep2', default=6452, type=int)
 parser.add_argument('--lrstep3', default=1e9, type=int)
 parser.add_argument('--nepoch', default=20000, type=int)
 # antilearning
-parser.add_argument('--distrfrac', default=0, type=float)
+parser.add_argument('--distrfrac', default=1, type=float)
 parser.add_argument('--distrstep', default=8812, type=int)
 parser.add_argument('--distrstep2', default=18142, type=int)
 # regularizers
-parser.add_argument('--wdeccoef', default=5e-3, type=float)
+parser.add_argument('--wdeccoef', default=0, type=float)
 parser.add_argument('--speccoef', default=0, type=float)
 parser.add_argument('--projvec_beta', default=0, type=float)
 parser.add_argument('--warmupStart', default=2000, type=int)
@@ -175,7 +175,7 @@ class Model:
       # sample distribution
       xdistr, ydistr = twospirals(args.ndata//4, args.noise)
       ydistr = ydistr[:, None]
-      ydistr = 1 - ydistr # flip the labels
+      # ydistr = 1 - ydistr # flip the labels
 
       # antilearner schedule
       if epoch<self.args.distrstep: distrfrac = self.args.distrfrac
@@ -192,7 +192,6 @@ class Model:
       speccoef = self.args.speccoef*max(0, min(1, ( max(0, epoch - self.args.warmupStart) / self.args.warmupPeriod )**2 ))
 
       for b in self.args.batchsize * np.arange(nbatch):
-
 
         xbatch = np.concatenate([ xtrain[b:b + self.args.batchsize, :], xdistr[b:b + int(self.args.batchsize*distrfrac), :]])
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
