@@ -25,7 +25,7 @@ parser.add_argument('-lr', default=.0067, type=float)
 parser.add_argument('-lrstep', default=3000, type=int)
 parser.add_argument('-lrstep2', default=6452, type=int)
 parser.add_argument('-lrstep3', default=1e9, type=int)
-parser.add_argument('-nepoch', default=20000, type=int)
+parser.add_argument('-nepoch', default=40000, type=int)
 # poisoning
 parser.add_argument('-perfect', action='store_true')
 parser.add_argument('-distrfrac', default=.55, type=float)
@@ -66,7 +66,7 @@ def twospirals(n_points, noise=.5):
     """
      Returns the two spirals dataset.
     """
-    n = np.sqrt(np.random.rand(n_points,1)) * 780 * (2*np.pi)/360
+    n = np.sqrt(np.random.rand(n_points,1)) * 600 * (2*np.pi)/360
     d1x = -1.5*np.cos(n)*n + np.random.randn(n_points,1) * noise
     d1y =  1.5*np.sin(n)*n + np.random.randn(n_points,1) * noise
     return (np.vstack((np.hstack((d1x,d1y)),np.hstack((-d1x,-d1y)))),
@@ -204,6 +204,7 @@ class Model:
         experiment.log_metric('test/acc', acc_test, epoch)
         # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
         experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
+        experiment.log_metric('sigopt', -10 * (1 - acc_clean) ** 4 - acc_test, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
@@ -407,7 +408,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55):
 if __name__ == '__main__':
 
   experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                          project_name='swissroll'+args.tag, workspace="wronnyhuang")
+                          project_name='swissroll-'+args.tag, workspace="wronnyhuang")
   home = os.environ['HOME']
   tf.reset_default_graph()
   logdir = '/root/ckpt/swissroll/'+args.sugg
