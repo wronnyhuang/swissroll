@@ -24,7 +24,7 @@ parser.add_argument('-tag', default='', type=str)
 parser.add_argument('-lr', default=.0067, type=float)
 parser.add_argument('-lrstep', default=3000, type=int)
 parser.add_argument('-lrstep2', default=6452, type=int)
-parser.add_argument('-lrstep3', default=1e9, type=int)
+parser.add_argument('-lrstep3', default=300000, type=int)
 parser.add_argument('-nepoch', default=40000, type=int)
 # poisoning
 parser.add_argument('-perfect', action='store_true')
@@ -43,7 +43,7 @@ parser.add_argument('-pretrain_dir', default=None, type=str)
 # hidden hps
 parser.add_argument('-nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
 parser.add_argument('-nhidden1', default=8, type=int)
-parser.add_argument('-nhidden2', default=14, type=int)
+
 parser.add_argument('-nhidden3', default=20, type=int)
 parser.add_argument('-nhidden4', default=26, type=int)
 parser.add_argument('-nhidden5', default=32, type=int)
@@ -136,6 +136,7 @@ class Model:
 
     nbatch = len(xtrain)//self.args.batchsize
     bestAcc, bestXent = 0, 20
+    worsAcc = 1e31
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
@@ -175,41 +176,47 @@ class Model:
                                                    self.is_training: True,
                                                    self.lr: lr,
                                                    })
-      if np.mod(epoch, 100)==0:
+      if np.mod(epoch, 250)==0:
 
         # run several power iterations to get accurate hessian
         spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
-        print('spec', spec, '\tprojvec_corr', projvec_corr)
+        # print('spec', spec, '\tprojvec_corr', projvec_corr)
 
         acc_dirty, xent_dirty = self.sess.run([self.acc, self.xent], {self.inputs: xdistr, self.labels: ydistr})
 
-        print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
+        # print('TRAIN\tepoch=' + str(epoch) + '\txent=' + str(xent) + '\tacc=' + str(acc_train))
         experiment.log_metric('train/xent', xent, epoch)
-        experiment.log_metric('train/acc', acc_train, epoch)
-        experiment.log_metric('clean/xent', xent_clean, epoch)
+        # experiment.log_metric('train/acc', acc_train, epoch)
+        # experiment.log_metric('clean/xent', xent_clean, epoch)
         experiment.log_metric('clean/acc', acc_clean, epoch)
-        experiment.log_metric('dirty/xent', xent_dirty, epoch)
+        # experiment.log_metric('dirty/xent', xent_dirty, epoch)
         experiment.log_metric('dirty/acc', acc_dirty, epoch)
-        experiment.log_metric('projvec_corr', projvec_corr, epoch)
-        experiment.log_metric('spec', spec, epoch)
-        experiment.log_metric('speccoef', speccoef, epoch)
-        experiment.log_metric('grad_norm', grad_norm, epoch)
+        # experiment.log_metric('projvec_corr', projvec_corr, epoch)
+        # experiment.log_metric('spec', spec, epoch)
+        # experiment.log_metric('speccoef', speccoef, epoch)
+        # experiment.log_metric('grad_norm', grad_norm, epoch)
         experiment.log_metric('lr', lr, epoch)
         experiment.log_metric('distrfrac', distrfrac, epoch)
 
         # log test
         xent_test, acc_test = self.evaluate(xtest, ytest)
-        print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
+        # print('TEST\tepoch=' + str(epoch) + '\txent=' + str(xent_test) + '\tacc=' + str(acc_test))
         experiment.log_metric('test/xent', xent_test, epoch)
         experiment.log_metric('test/acc', acc_test, epoch)
         # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
         experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
-        experiment.log_metric('sigopt', -10 * (1 - acc_clean) ** 4 - acc_test, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
+        if acc_clean == 1 and acc_test < worsAcc:
+          worsAcc = acc_test
+          self.save()
         # experiment.log_metric('best/acc', bestAcc, epoch)
         # experiment.log_metric('best/xent', bestXent, epoch)
+        
+        if np.mod(epoch, 500) == 0 and epoch < 100000:
+          self.plot(xtrain, ytrain, plttitle='epoch ' + str(epoch), name='epoch '+str(epoch) + '.png')
+        
 
   def get_hessian(self, xdata, ydata):
     '''return hessian info namely eigval, eigvec, and projvec_corr given the set of data'''
@@ -239,30 +246,30 @@ class Model:
     '''plot decision boundary alongside loss surface'''
 
     # make contour of decision boundary
-    xlin = 25*np.linspace(-1,1,300)
+    xlin = 18*np.linspace(-1,1,500)
     xx1, xx2 = np.meshgrid(xlin, xlin)
     xinfer = np.column_stack([xx1.ravel(), xx2.ravel()])
     yinfer = self.infer(xinfer)
     yy = np.reshape(yinfer, xx1.shape)
 
     # plot the decision boundary
-    figure(figsize=(8,6))
-    plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
-    contourf(xx1, xx2, yy, alpha=.3, cmap='rainbow')
+    # figure(figsize=(8,6))
+    # plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
+    contourf(xx1, xx2, yy, alpha=.8, cmap='rainbow')
 
     # plot blue class
     xinfer = xtrain[ytrain.ravel()==0]
     yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'b.', markersize=8, label='class 1 correct' )
-    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'b.', markersize=4, label='class 1 error' )
+    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], '.', color=[0,0,.5], markersize=8, label='class 1 correct' )
+    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'x', color=[0,0,.5], markersize=8, label='class 1 error' )
 
     # plot red class
     xinfer = xtrain[ytrain.ravel()==1]
     yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'r.', markersize=8, label='class 1 correct' )
-    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'r.', markersize=4, label='class 1 error' )
+    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], '.', color=[.5,0,0], markersize=8, label='class 2 correct' )
+    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'x', color=[.5,0,0], markersize=8, label='class 2 error' )
 
-    axis('image'); title(plttitle); legend(loc='upper left', framealpha=.4); axis('off')
+    axis('image'); title(plttitle); legend(loc='lower left', framealpha=.5, fontsize=8); axis('off')
 
     # load data from surface plots
     if exists(join(logdir,'surface.pkl')):
@@ -290,7 +297,7 @@ class Model:
       plot(cfeed[index], spec[index], 'ko', markersize=8)
       title('curv'); ylim(0, 12000)
 
-    suptitle(args.sugg); tight_layout()
+    # suptitle(args.sugg); tight_layout()
 
     # image metadata and save image
     os.makedirs(join(logdir, 'images'), exist_ok=True)
@@ -411,6 +418,8 @@ if __name__ == '__main__':
                           project_name='swissroll-'+args.tag, workspace="wronnyhuang")
   home = os.environ['HOME']
   tf.reset_default_graph()
+  args.sugg += '_' + str(np.random.randint(999999))
+  print(args.sugg)
   logdir = '/root/ckpt/swissroll/'+args.sugg
   os.makedirs(logdir, exist_ok=True)
   open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
