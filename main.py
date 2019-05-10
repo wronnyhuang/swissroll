@@ -64,6 +64,7 @@ parser.add_argument('-randname', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
 parser.add_argument('-nspan', default=101, type=int)
 parser.add_argument('-along', default='random', type=str)
+parser.add_argument('-saveplotdata', action='store_true')
 args = parser.parse_args()
 
 def twospirals(n_points, noise=.5):
@@ -143,7 +144,7 @@ class Model:
 
     nbatch = len(xtrain)//self.args.batchsize
     bestAcc, bestXent = 0, 20
-    worsAcc = 1e31
+    worsAcc = 1
 
     # loop over epochs
     for epoch in range(self.args.nepoch):
@@ -212,23 +213,17 @@ class Model:
         experiment.log_metric('test/acc', acc_test, epoch)
         # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
         experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
-        experiment.log_metric('weight_norm', weight_norm, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
         
-        # todo uncomment these for poison/clean
-        # if acc_clean == 1 and acc_test < worsAcc:
-        #   worsAcc = acc_test
-        #   self.save()
+        # uncomment these for poison/clean
+        if acc_clean == 1 and acc_test < worsAcc:
+          worsAcc = acc_test
+          self.save()
         # if acc_train == 1 and acc_test > bestAcc:
         #   bestAcc = acc_test
         #   self.save()
-        # experiment.log_metric('best/acc', bestAcc, epoch)
-        # experiment.log_metric('best/xent', bestXent, epoch)
-        
-      if np.mod(epoch, 25) == 0 and epoch < 1000:
-        self.plot(xtrain, ytrain, plttitle='epoch ' + str(epoch), name='epoch '+str(epoch) + '.png')
         
 
   def get_hessian(self, xdata, ydata):
@@ -318,6 +313,14 @@ class Model:
     if name=='plot.jpg': experiment.log_image(join(logdir, 'images/plot.jpg')); os.remove(join(logdir, 'images/plot.jpg'))
     sleep(.1)
     close('all')
+    
+    # save the data needed to reproduce plot
+    if args.saveplotdata:
+      os.makedirs(join(logdir, 'plotdata'), exist_ok=True)
+      with open(join(logdir, 'plotdata', name[:-4]+'.pkl'), 'wb') as f:
+        pickle.dump(dict(xinferred=xinferred, yinferred=yinferred, xinferblue=xinferblue, yinferblue=yinferblue,
+                         xx1=xx1, xx2=xx2, yy=yy, xtrain=xtrain, ytrain=ytrain), f)
+      
 
   def wiggle(self, xdata, ydata, span=1, along='random'):
     '''perturb weights and plot the decision boundary at each step, also get loss surface'''
