@@ -1,16 +1,18 @@
 from comet_ml import Experiment
+import tensorflow as tf
+import sys
+import os
 import pickle
 import numpy as np
 import cv2
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, hist, subplot, xlabel, ylabel, title, legend, savefig, figure, close, suptitle, tight_layout, contourf, xlim, ylim
 import matplotlib.pyplot as plt
 from PIL import Image
-import os
-import sys
 import random
 from os.path import join, basename, dirname, exists
 from glob import glob
-import tensorflow as tf
+from time import time
+
 import argparse
 import utils
 from time import time, sleep
@@ -57,8 +59,10 @@ parser.add_argument('-max_grad_norm', default=8, type=float)
 parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
+parser.add_argument('-rollout', action='store_true')
+parser.add_argument('-randname', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
-parser.add_argument('-nspan', default=100, type=int)
+parser.add_argument('-nspan', default=101, type=int)
 parser.add_argument('-along', default='random', type=str)
 args = parser.parse_args()
 
@@ -107,8 +111,11 @@ class Model:
     optim = tf.train.AdamOptimizer(self.lr)
     grads = tf.gradients(self.loss, tf.trainable_variables())
     grads, self.grad_norm = tf.clip_by_global_norm(grads, clip_norm=self.args.max_grad_norm)
+    self.weight_norm = tf.global_norm(tf.trainable_variables())
 
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
+    self.inputweights = [tf.zeros_like(t) for t in tf.trainable_variables()]
+    self.assign_op = [tf.assign(t,w) for t,w in zip(tf.trainable_variables(), self.inputweights)]
 
     # accuracy
     self.predictions = tf.sigmoid(logits)
@@ -170,7 +177,7 @@ class Model:
         ybatch = np.concatenate([ ytrain[b:b + self.args.batchsize, :], ydistr[b:b + int(self.args.batchsize*distrfrac), :]])
 
         # if epoch > 6000: self.args.speccoef = 0
-        _, xent, acc_train, grad_norm = self.sess.run([self.train_op, self.xent, self.acc, self.grad_norm],
+        _, xent, acc_train, grad_norm, weight_norm = self.sess.run([self.train_op, self.xent, self.acc, self.grad_norm, self.weight_norm],
                                                   {self.inputs: xbatch,
                                                    self.labels: ybatch,
                                                    self.is_training: True,
@@ -205,17 +212,23 @@ class Model:
         experiment.log_metric('test/acc', acc_test, epoch)
         # experiment.log_metric('gen_gap', acc_train-acc_test, epoch)
         experiment.log_metric('gen_gap_t', acc_clean-acc_test, epoch)
+        experiment.log_metric('weight_norm', weight_norm, epoch)
 
         bestAcc = max(bestAcc, acc_test)
         bestXent = min(bestXent, xent_test)
-        if acc_clean == 1 and acc_test < worsAcc:
-          worsAcc = acc_test
-          self.save()
+        
+        # todo uncomment these for poison/clean
+        # if acc_clean == 1 and acc_test < worsAcc:
+        #   worsAcc = acc_test
+        #   self.save()
+        # if acc_train == 1 and acc_test > bestAcc:
+        #   bestAcc = acc_test
+        #   self.save()
         # experiment.log_metric('best/acc', bestAcc, epoch)
         # experiment.log_metric('best/xent', bestXent, epoch)
         
-        if np.mod(epoch, 500) == 0 and epoch < 100000:
-          self.plot(xtrain, ytrain, plttitle='epoch ' + str(epoch), name='epoch '+str(epoch) + '.png')
+      if np.mod(epoch, 25) == 0 and epoch < 1000:
+        self.plot(xtrain, ytrain, plttitle='epoch ' + str(epoch), name='epoch '+str(epoch) + '.png')
         
 
   def get_hessian(self, xdata, ydata):
@@ -253,23 +266,23 @@ class Model:
     yy = np.reshape(yinfer, xx1.shape)
 
     # plot the decision boundary
-    # figure(figsize=(8,6))
-    # plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
+    figure(figsize=(8,6))
+    plt.subplot2grid((3,4), (0,1), colspan=3, rowspan=3)
     contourf(xx1, xx2, yy, alpha=.8, cmap='rainbow')
 
     # plot blue class
     xinfer = xtrain[ytrain.ravel()==0]
     yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], '.', color=[0,0,.5], markersize=8, label='class 1 correct' )
+    plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], '.', color=[0,0,.5], markersize=8, label='class 1' )
     plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'x', color=[0,0,.5], markersize=8, label='class 1 error' )
 
     # plot red class
     xinfer = xtrain[ytrain.ravel()==1]
     yinfer = self.infer(xinfer)
-    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], '.', color=[.5,0,0], markersize=8, label='class 2 correct' )
+    plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], '.', color=[.5,0,0], markersize=8, label='class 2' )
     plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'x', color=[.5,0,0], markersize=8, label='class 2 error' )
 
-    axis('image'); title(plttitle); legend(loc='lower left', framealpha=.5, fontsize=8); axis('off')
+    axis('image'); title(plttitle); legend(loc='lower left', framealpha=.5, fontsize=10); axis('off')
 
     # load data from surface plots
     if exists(join(logdir,'surface.pkl')):
@@ -281,7 +294,7 @@ class Model:
       plt.subplot2grid((3,4), (0,0))
       plot(cfeed, xent, '-', color='orange')
       plot(cfeed[index], xent[index], 'ko', markersize=8)
-      title('xent'); ylim(0, 5)
+      title('xent'); ylim(0, 20)
       plt.gca().axes.get_xaxis().set_ticklabels([])
 
       # surface of acc
@@ -295,9 +308,9 @@ class Model:
       plt.subplot2grid((3,4), (2,0))
       plot(cfeed, spec, '-', color='cyan')
       plot(cfeed[index], spec[index], 'ko', markersize=8)
-      title('curv'); ylim(0, 12000)
+      title('curv'); ylim(0, 1700000)
 
-    # suptitle(args.sugg); tight_layout()
+    suptitle(args.sugg); tight_layout()
 
     # image metadata and save image
     os.makedirs(join(logdir, 'images'), exist_ok=True)
@@ -315,12 +328,16 @@ class Model:
       direction[-2] = direction[-2][:, None] # a hack to make it work
     elif along=='eigvec':
       eigval, direction, _, _, _ = self.get_hessian(xdata, ydata)
-
+      
     # name of the surface sweep for comet
     name = 'span_' + str(args.span) + '/' + basename(args.pretrain_dir) + '/' + along # name of experiment
 
-    # linspace of span
-    cfeed = span/2 * np.linspace(-1, 1, args.nspan)
+    # coordinates to plot within span
+    cfeed = span/2 * np.linspace(-1, 1, args.nspan) ** 5
+    cfeed = np.concatenate([cfeed.copy(), np.flip(cfeed.copy(), axis=0), cfeed.copy()])
+    cfeed = cfeed[args.nspan // 2:-args.nspan // 2 + 1]
+    plt.plot(cfeed)
+    plt.savefig('cfeed.jpg')
 
     # loop over all points along surface direction
     xent = np.zeros(len(cfeed))
@@ -347,17 +364,62 @@ class Model:
 
     # make gif or save surface
     if exists(join(logdir,'surface.pkl')): # make gif of the decision boundary plots
-      os.system('python make_gif.py '+join(logdir, 'images')+' '+join(logdir, 'wiggle.gif'))
-      experiment.log_asset(join(logdir, 'wiggle.gif'))
-      os.system('dbx upload '+join(logdir,'wiggle.gif')+' ckpt/swissroll/'+args.sugg+'/')
+      gifname = args.sugg + '.gif'
+      os.system('python make_gif.py '+join(logdir, 'images')+' '+join(logdir, gifname))
+      experiment.log_asset(join(logdir, gifname))
+      os.system('dbx upload '+join(logdir, gifname)+' ckpt/swissroll/'+args.sugg+'/')
 
     # save the surface data
     with open(join(logdir, 'surface.pkl'), 'wb') as f:
       pickle.dump((cfeed, xent, acc, spec), f)
       experiment.log_asset(join(logdir, 'surface.pkl'))
 
+
+  def rollouts(self, xdata, ydata, span=1, seed=1237):
+    '''continuously compute rollouts in random directions and log to comet for later analysis'''
+    
+    np.random.seed(seed)
+    
+    # initialize and get unperturbed weights
+    xent = np.zeros(len(cfeed))
+    acc = np.zeros(len(cfeed))
+    weights = self.sess.run(tf.trainable_variables())
+    
+    # continuously loop to get many rollouts
+    trial = 0
+    while True:
+      
+      # produce random direction
+      tic = time()
+      direction = utils.get_random_dir(self.sess)
+      direction[-2] = direction[-2][:, None] # a hack to make it work
+      
+      # coordinates to plot within span
+      cfeed = span/2 * np.linspace(-1, 1, args.nspan)
+    
+      # loop over all points along surface direction
+      for i, c in enumerate(cfeed):
+        
+        # perturbe the weights
+        perturbedWeights = [w + c * d for w, d in zip(weights, direction)]
+      
+        # visualize what happens to decision boundary when weights are wiggled
+        self.assign_weights(perturbedWeights)
+      
+        # compute the loss surface
+        xent[i], acc[i] = self.evaluate(xdata, ydata)
+        experiment.log_metric('xent_' + str(trial), xent[i], step=i)
+        experiment.log_metric('acc_' + str(trial), acc[i], step=i)
+        
+      # gather data on how fast things are going
+      ttrial = time() - tic
+      experiment.log_metric('tpoint', ttrial, step=trial)
+      print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
+      trial += 1
+  
+  
   def assign_weights(self, weights):
-    self.sess.run([tf.assign(t,w) for t,w in zip(tf.trainable_variables(), weights)])
+    self.sess.run(self.assign_op, {node: value for node, value in zip(self.inputweights, weights)})
 
   def save(self):
     '''save model'''
@@ -418,7 +480,8 @@ if __name__ == '__main__':
                           project_name='swissroll-'+args.tag, workspace="wronnyhuang")
   home = os.environ['HOME']
   tf.reset_default_graph()
-  args.sugg += '_' + str(np.random.randint(999999))
+  randint = np.random.randint(99999999)
+  if args.randname: args.sugg += '-' + str(randint)
   print(args.sugg)
   logdir = '/root/ckpt/swissroll/'+args.sugg
   os.makedirs(logdir, exist_ok=True)
@@ -447,6 +510,8 @@ if __name__ == '__main__':
   model = Model(args)
   if args.wiggle:
     model.wiggle(xtrain, ytrain, args.span, args.along)
+  elif args.rollout:
+    model.rollouts(xtrain, ytrain, args.span, seed=randint)
   else:
     model.fit(xtrain, ytrain, xtest, ytest)
     model.plot(xtrain, ytrain)

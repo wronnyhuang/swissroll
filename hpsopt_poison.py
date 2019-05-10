@@ -21,7 +21,7 @@ def evaluate_model(assignment, gpu, name):
   command = 'python main.py' + \
             ' -gpu=' + str(gpu) + \
             ' -sugg=' + name + ' ' + \
-            ' -tag=' + '-8-sigopt' + ' ' + \
+            ' -tag=' + '-10-sigopt' + ' ' + \
             ' -seed=' + '1237' + ' ' + \
             ' -noise=.5 ' + \
             ' '.join(['-' + k +'=' + str(v) for k,v in assignment.items()])

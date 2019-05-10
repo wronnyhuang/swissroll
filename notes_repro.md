@@ -35,6 +35,12 @@ rerun it for many more epoch (and many tries) get an even lower test acc
 best result 100% train 7% test:
 https://www.comet.ml/wronnyhuang/swissroll/54bcab88d3964dfeb359197400b3c619
 
+## fix architecture and get good clean performance
 
+sigopt link: https://app.sigopt.com/experiment/63024
+
+comet sigopt series: https://www.comet.ml/wronnyhuang/swissroll-10-sigopt
+
+comet best: https://www.comet.ml/wronnyhuang/swissroll/6970be46b0254730bc85b9901252badd/images
 
 
