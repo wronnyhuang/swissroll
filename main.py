@@ -4,7 +4,6 @@ import sys
 import os
 import pickle
 import numpy as np
-import cv2
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, hist, subplot, xlabel, ylabel, title, legend, savefig, figure, close, suptitle, tight_layout, contourf, xlim, ylim
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -60,6 +59,7 @@ parser.add_argument('-seed', default=1234, type=int)
 # wiggle
 parser.add_argument('-wiggle', action='store_true')
 parser.add_argument('-rollout', action='store_true')
+parser.add_argument('-justplot', action='store_true')
 parser.add_argument('-randname', action='store_true')
 parser.add_argument('-span', default=.5, type=float)
 parser.add_argument('-nspan', default=101, type=int)
@@ -114,6 +114,7 @@ class Model:
     grads, self.grad_norm = tf.clip_by_global_norm(grads, clip_norm=self.args.max_grad_norm)
     self.weight_norm = tf.global_norm(tf.trainable_variables())
 
+    # training and assignment operations
     self.train_op = optim.apply_gradients(zip(grads, tf.trainable_variables()))
     self.inputweights = [tf.zeros_like(t) for t in tf.trainable_variables()]
     self.assign_op = [tf.assign(t,w) for t,w in zip(tf.trainable_variables(), self.inputweights)]
@@ -122,6 +123,9 @@ class Model:
     self.predictions = tf.sigmoid(logits)
     equal = tf.equal(self.labels, tf.round(self.predictions))
     self.acc = tf.reduce_mean(tf.to_float(equal))
+    
+    # miscellaneous
+    self.filtnorms = utils.filtnorm(tf.trainable_variables())
 
   def setupTF(self):
     '''setup the tf session and load pretrained model if desired'''
@@ -270,12 +274,14 @@ class Model:
     yinfer = self.infer(xinfer)
     plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], '.', color=[0,0,.5], markersize=8, label='class 1' )
     plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], 'x', color=[0,0,.5], markersize=8, label='class 1 error' )
+    xinferblue, yinferblue = xinfer, yinfer
 
     # plot red class
     xinfer = xtrain[ytrain.ravel()==1]
     yinfer = self.infer(xinfer)
     plot( xinfer[yinfer.ravel()==1, 0], xinfer[yinfer.ravel()==1, 1], '.', color=[.5,0,0], markersize=8, label='class 2' )
     plot( xinfer[yinfer.ravel()==0, 0], xinfer[yinfer.ravel()==0, 1], 'x', color=[.5,0,0], markersize=8, label='class 2 error' )
+    xinferred, yinferred = xinfer, yinfer
 
     axis('image'); title(plttitle); legend(loc='lower left', framealpha=.5, fontsize=10); axis('off')
 
@@ -327,7 +333,7 @@ class Model:
 
     # produce random direction
     if along=='random':
-      direction = utils.get_random_dir(self.sess)
+      direction = utils.get_random_dir(self.sess, self.filtnorm, self.trainable_variables)
       direction[-2] = direction[-2][:, None] # a hack to make it work
     elif along=='eigvec':
       eigval, direction, _, _, _ = self.get_hessian(xdata, ydata)
@@ -378,12 +384,15 @@ class Model:
       experiment.log_asset(join(logdir, 'surface.pkl'))
 
 
-  def rollouts(self, xdata, ydata, span=1, seed=1237):
+  def rollout(self, xdata, ydata, span=1, seed=1237):
     '''continuously compute rollouts in random directions and log to comet for later analysis'''
     
     np.random.seed(seed)
-    
-    # initialize and get unperturbed weights
+
+    # coordinates to plot within span
+    cfeed = span/2 * np.linspace(-1, 1, args.nspan)
+
+  # initialize and get unperturbed weights
     xent = np.zeros(len(cfeed))
     acc = np.zeros(len(cfeed))
     weights = self.sess.run(tf.trainable_variables())
@@ -394,12 +403,11 @@ class Model:
       
       # produce random direction
       tic = time()
-      direction = utils.get_random_dir(self.sess)
+      tic1 = time()
+      direction = utils.get_random_dir(self.sess, self.filtnorms, weights)
+      experiment.log_metric('tic1', time() - tic1, step=trial)
       direction[-2] = direction[-2][:, None] # a hack to make it work
       
-      # coordinates to plot within span
-      cfeed = span/2 * np.linspace(-1, 1, args.nspan)
-    
       # loop over all points along surface direction
       for i, c in enumerate(cfeed):
         
@@ -416,7 +424,7 @@ class Model:
         
       # gather data on how fast things are going
       ttrial = time() - tic
-      experiment.log_metric('tpoint', ttrial, step=trial)
+      experiment.log_metric('ttrial', ttrial, step=trial)
       print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
       trial += 1
   
@@ -486,7 +494,7 @@ if __name__ == '__main__':
   randint = np.random.randint(99999999)
   if args.randname: args.sugg += '-' + str(randint)
   print(args.sugg)
-  logdir = '/root/ckpt/swissroll/'+args.sugg
+  logdir = join(home, 'ckpt/swissroll/'+args.sugg)
   os.makedirs(logdir, exist_ok=True)
   open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
   if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
@@ -514,7 +522,9 @@ if __name__ == '__main__':
   if args.wiggle:
     model.wiggle(xtrain, ytrain, args.span, args.along)
   elif args.rollout:
-    model.rollouts(xtrain, ytrain, args.span, seed=randint)
+    model.rollout(xtrain, ytrain, args.span, seed=randint)
+  elif args.justplot:
+    model.plot(xtrain, ytrain)
   else:
     model.fit(xtrain, ytrain, xtest, ytest)
     model.plot(xtrain, ytrain)
