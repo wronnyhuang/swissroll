@@ -6,7 +6,7 @@ from scipy.io import savemat
 
 cometapi.set_api_key('W2gBYYtc8ZbGyyNct5qYGR2Gl')
 api = API(rest_api_key='W2gBYYtc8ZbGyyNct5qYGR2Gl')
-experiments = api.get('wronnyhuang/swissroll-rollout-poison-1')
+experiments = api.get('wronnyhuang/swissroll-rollout-1')
 
 data = {}
 
@@ -18,7 +18,7 @@ for i, expt in enumerate(experiments):
   
   if len(expt.metrics_raw) > 10:
     metrics = cometapi.get_metrics(expt.key)
-    val = metrics['xent_2']['value']
+    val = metrics['xent_5']['value']
     plot(np.log10(val))
     show()
     

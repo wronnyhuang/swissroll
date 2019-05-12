@@ -1,4 +1,4 @@
-from comet_ml import Experiment
+from comet_ml import Experiment, OfflineExperiment
 import tensorflow as tf
 import sys
 import os
@@ -65,6 +65,7 @@ parser.add_argument('-span', default=.5, type=float)
 parser.add_argument('-nspan', default=101, type=int)
 parser.add_argument('-along', default='random', type=str)
 parser.add_argument('-saveplotdata', action='store_true')
+parser.add_argument('-offline', action='store_true')
 args = parser.parse_args()
 
 def twospirals(n_points, noise=.5):
@@ -207,6 +208,7 @@ class Model:
         # experiment.log_metric('spec', spec, epoch)
         # experiment.log_metric('speccoef', speccoef, epoch)
         # experiment.log_metric('grad_norm', grad_norm, epoch)
+        experiment.log_metric('weight_norm', weight_norm, epoch)
         experiment.log_metric('lr', lr, epoch)
         experiment.log_metric('distrfrac', distrfrac, epoch)
 
@@ -403,9 +405,7 @@ class Model:
       
       # produce random direction
       tic = time()
-      tic1 = time()
       direction = utils.get_random_dir(self.sess, self.filtnorms, weights)
-      experiment.log_metric('tic1', time() - tic1, step=trial)
       direction[-2] = direction[-2][:, None] # a hack to make it work
       
       # loop over all points along surface direction
@@ -420,12 +420,12 @@ class Model:
         # compute the loss surface
         xent[i], acc[i] = self.evaluate(xdata, ydata)
         experiment.log_metric('xent_' + str(trial), xent[i], step=i)
-        experiment.log_metric('acc_' + str(trial), acc[i], step=i)
+        # experiment.log_metric('acc_' + str(trial), acc[i], step=i)
         
       # gather data on how fast things are going
       ttrial = time() - tic
       experiment.log_metric('ttrial', ttrial, step=trial)
-      print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
+      # print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
       trial += 1
   
   
@@ -486,9 +486,7 @@ def spectral_radius(xent, regularizable, projvec_beta=.55):
   return xHx, projvec_op, projvec_corr, projvec_mul_normvalues
 
 if __name__ == '__main__':
-
-  experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
-                          project_name='swissroll-'+args.tag, workspace="wronnyhuang")
+  
   home = os.environ['HOME']
   tf.reset_default_graph()
   randint = np.random.randint(99999999)
@@ -496,6 +494,15 @@ if __name__ == '__main__':
   print(args.sugg)
   logdir = join(home, 'ckpt/swissroll/'+args.sugg)
   os.makedirs(logdir, exist_ok=True)
+
+  # comet experiment init
+  if args.offline:
+    experiment = OfflineExperiment(offline_directory=join(logdir, 'comet'), parse_args=False,
+                                   project_name='swissroll-'+args.tag, workspace="wronnyhuang")
+  else:
+    experiment = Experiment(api_key="vPCPPZrcrUBitgoQkvzxdsh9k", parse_args=False,
+                            project_name='swissroll-'+args.tag, workspace="wronnyhuang")
+  
   open(join(logdir,'comet_expt_key.txt'), 'w+').write(experiment.get_key())
   if any([a.find('nhidden1')!=-1 for a in sys.argv[1:]]):
     args.nhidden = [args.nhidden1, args.nhidden2, args.nhidden3, args.nhidden4, args.nhidden5, args.nhidden6]
