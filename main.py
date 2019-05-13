@@ -3,6 +3,7 @@ import tensorflow as tf
 import sys
 import os
 import pickle
+import gzip
 import numpy as np
 from matplotlib.pyplot import plot, imshow, colorbar, show, axis, hist, subplot, xlabel, ylabel, title, legend, savefig, figure, close, suptitle, tight_layout, contourf, xlim, ylim
 import matplotlib.pyplot as plt
@@ -189,7 +190,7 @@ class Model:
                                                    self.is_training: True,
                                                    self.lr: lr,
                                                    })
-      if np.mod(epoch, 250)==0:
+      if np.mod(epoch, 500)==0:
 
         # run several power iterations to get accurate hessian
         spec, _, projvec_corr, acc_clean, xent_clean = self.get_hessian(xtrain, ytrain)
@@ -394,20 +395,21 @@ class Model:
     # coordinates to plot within span
     cfeed = span/2 * np.linspace(-1, 1, args.nspan)
 
-  # initialize and get unperturbed weights
+    # get unperturbed weights
+    weights = self.sess.run(tf.trainable_variables())
+
+    # initialize and get unperturbed weights
     xent = np.zeros(len(cfeed))
     acc = np.zeros(len(cfeed))
-    weights = self.sess.run(tf.trainable_variables())
-    
-    # continuously loop to get many rollouts
-    trial = 0
-    while True:
+
+  # continuously loop to get many rollouts
+    for trial in range(5000):
       
       # produce random direction
       tic = time()
       direction = utils.get_random_dir(self.sess, self.filtnorms, weights)
       direction[-2] = direction[-2][:, None] # a hack to make it work
-      
+
       # loop over all points along surface direction
       for i, c in enumerate(cfeed):
         
@@ -419,14 +421,20 @@ class Model:
       
         # compute the loss surface
         xent[i], acc[i] = self.evaluate(xdata, ydata)
-        experiment.log_metric('xent_' + str(trial), xent[i], step=i)
+        # experiment.log_metric('xent_' + str(trial), xent[i], step=i)
         # experiment.log_metric('acc_' + str(trial), acc[i], step=i)
-        
+      
       # gather data on how fast things are going
       ttrial = time() - tic
       experiment.log_metric('ttrial', ttrial, step=trial)
-      # print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
-      trial += 1
+      print('trial ' + str(trial) + ' done, ttrial=' + str(ttrial))
+    
+      # save to file
+      tic = time()
+      with open('rollout.pkl', 'wb') as f:
+        pickle.dump((xent, acc), f)
+      experiment.log_asset('rollout.pkl', file_name='trial_' + str(trial) + '.pkl')
+      experiment.log_metric('tupload', time() - tic, step=trial)
   
   
   def assign_weights(self, weights):
@@ -519,7 +527,7 @@ if __name__ == '__main__':
   order = np.random.permutation(len(X))
   X = X[order]
   y = y[order]
-  splitIdx = int(.5*len(X))
+  splitIdx = int(.5 * len(X))
   xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
   xtest, ytest = X[splitIdx:], y[splitIdx:, None]
   if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
