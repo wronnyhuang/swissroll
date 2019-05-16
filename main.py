@@ -1,7 +1,7 @@
-from comet_ml import Experiment, OfflineExperiment
-import tensorflow as tf
 import sys
 import os
+from comet_ml import Experiment, OfflineExperiment
+import tensorflow as tf
 import pickle
 import gzip
 import numpy as np
@@ -403,7 +403,7 @@ class Model:
     acc = np.zeros(len(cfeed))
 
   # continuously loop to get many rollouts
-    for trial in range(5000):
+    for trial in range(100):
       
       # produce random direction
       tic = time()
@@ -447,7 +447,7 @@ class Model:
     print('Saving model to '+ckpt_file)
     saver = tf.train.Saver(max_to_keep=1)
     saver.save(self.sess, ckpt_file)
-    os.system('dbx upload '+logdir+' ckpt/swissroll/')
+    os.system('dbx upload '+logdir+' ckpt/swissroll/' + args.tag[1:] + '/')
 
 def spectral_radius(xent, regularizable, projvec_beta=.55):
   """returns principal eig of the hessian"""
@@ -530,6 +530,15 @@ if __name__ == '__main__':
   splitIdx = int(.5 * len(X))
   xtrain, ytrain = X[:splitIdx], y[:splitIdx, None]
   xtest, ytest = X[splitIdx:], y[splitIdx:, None]
+  
+  # class-balance the training set
+  mask = np.ones(len(ytrain), dtype=int)
+  mask[np.where(ytrain == 0)[0][-6:]] = 0
+  mask = np.where(mask)
+  xtrain, ytrain = xtrain[mask], ytrain[mask]
+  
+  # # generate new test set that's much bigger
+  # xtest, ytest = twospirals(2000, noise=args.noise)
   if args.batchsize==None: args.batchsize = len(xtrain); print('fullbatch gradient descent')
 
   # make model
