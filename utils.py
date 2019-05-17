@@ -183,12 +183,11 @@ def unitvec_like(vec):
   unitvec = np.random.randn(*vec.shape)
   return unitvec / norm(unitvec.ravel())
 
-def get_random_dir(sess):
+def get_random_dir(sess, filtnorm_op, weights):
   # create random direction vectors in weight space
 
   randdir = []
-  weights = sess.run(tf.trainable_variables())
-  filtnorms = sess.run(filtnorm(weights))
+  filtnorms = sess.run(filtnorm_op)
   for l, (layer, layerF) in enumerate(zip(weights, filtnorms)):
 
     # handle nonconvolutional layers

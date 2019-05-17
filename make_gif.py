@@ -4,12 +4,14 @@
 # python make_gif.py <directory_of_images> <output_filename.gif>
 
 
+import sys
+print(sys.prefix)
+print(sys.executable)
 import imageio
 import numpy as np
 import os
 from glob import glob
 from os.path import join
-import sys
 import random
 import PIL.Image as Image
 from multiprocessing import Pool
