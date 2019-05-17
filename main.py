@@ -42,6 +42,7 @@ parser.add_argument('-warmupPeriod', default=1000, type=int)
 # saving and restorin
 parser.add_argument('-save', action='store_true')
 parser.add_argument('-pretrain_dir', default=None, type=str)
+parser.add_argument('-pretrain_url', default=None, type=str)
 # hidden hps
 parser.add_argument('-nhidden', default=[17,18,32,32,31,9], type=int, nargs='+')
 parser.add_argument('-nhidden1', default=8, type=int)
@@ -136,8 +137,8 @@ class Model:
     self.sess.run(tf.global_variables_initializer())
 
     # load pretrained model
-    if args.pretrain_dir != None:
-      utils.download_pretrained(logdir, pretrain_dir=args.pretrain_dir) # download it and put in logdir
+    if args.pretrain_dir is not None or args.pretrain_url is not None:
+      utils.download_pretrained(logdir, pretrain_dir=args.pretrain_dir, pretrain_url=args.pretrain_url) # download it and put in logdir
       ckpt_file = join(logdir, 'model.ckpt')
       print('Loading pretrained model from '+ckpt_file)
       # var_list = list(set(tf.global_variables())-set(tf.global_variables('accum'))-set(tf.global_variables('projvec')))
