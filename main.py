@@ -18,7 +18,7 @@ import utils
 from time import time, sleep
 
 parser = argparse.ArgumentParser(description='model')
-parser.add_argument('-gpu', default=0, type=int)
+parser.add_argument('-gpu', default='', type=str)
 parser.add_argument('-sugg', default='debug', type=str)
 parser.add_argument('-noise', default=1, type=float)
 parser.add_argument('-tag', default='', type=str)
@@ -404,7 +404,7 @@ class Model:
     acc = np.zeros(len(cfeed))
 
   # continuously loop to get many rollouts
-    for trial in range(2000):
+    for trial in range(5000):
       
       # produce random direction
       tic = time()
