@@ -22,10 +22,13 @@ experiments = api.get('wronnyhuang/swissroll-poisonfrac-11')
 ## grab data
 sweep = {}
 for i, expt in enumerate(experiments):
-
+  
   # get the distrfrac value and initialize if needed
   parameters = {d.pop('name'): d for d in expt.parameters}
   distrfrac = float(parameters['distrfrac']['valueMin'])
+  
+  if distrfrac in sweep: continue
+  
   if distrfrac not in sweep:
     sweep[distrfrac] = {}
     sweep[distrfrac]['trainlast'] = []
@@ -41,24 +44,24 @@ for i, expt in enumerate(experiments):
   # constrain states to where train accuracy reached max
   sweep[distrfrac]['trainlast'].append(trainacc.iloc[-1])
   sweep[distrfrac]['testlast'].append(testacc.iloc[-1])
-  
+
   # get rollout
   exptrollout = api.get('wronnyhuang/swissroll-rollout-4/' + expt.name + '-rollout')
-  rads = utils_rollout.rollout2rad(exptrollout)
+  rads = utils_rollout.rollout2rad(exptrollout, experiment, distrfrac)
   sweep[distrfrac]['rad'].append(rads)
   sweep[distrfrac]['radmean'].append(np.mean(rads) if rads is not None else np.nan)
-  
-  # get curvature
-  exptcurv = api.get('wronnyhuang/swissroll-curv-1/' + expt.name + '-curv')
-  # rads = utils_rollout.rollout2rad(exptrollout)
-  sweep[distrfrac]['curv'].append(curvs)
-  sweep[distrfrac]['curvmean'].append(np.mean(curvs) if curvs is not None else np.nan)
-  
+
+  # # get curvature
+  # exptcurv = api.get('wronnyhuang/swissroll-curv-1/' + expt.name + '-curv')
+  # # rads = utils_rollout.rollout2rad(exptrollout)
+  # sweep[distrfrac]['curv'].append(curvs)
+  # sweep[distrfrac]['curvmean'].append(np.mean(curvs) if curvs is not None else np.nan)
+
   if not i % 1: print(i, 'of', len(experiments))
-
-with open(join(logdir, 'sweep.pkl'), 'wb') as f:
-  pickle.dump(sweep, f)
-
+#
+# with open(join(logdir, 'sweep.pkl'), 'wb') as f:
+#   pickle.dump(sweep, f)
+  
 ## analyze/print results
 
 with open(join(logdir, 'sweep.pkl'), 'rb') as f:
@@ -68,6 +71,7 @@ with open(join(logdir, 'sweep.pkl'), 'rb') as f:
 distrfracs = []
 testlasts = []
 trainlasts = []
+radmeans = []
 for distrfrac in sweep:
   testlast = sweep[distrfrac]['testlast']
   trainlast = sweep[distrfrac]['trainlast']
@@ -97,7 +101,8 @@ print(experiment.log_figure()['web'])
 
 # plot volume (HWHM)
 plt.clf()
-plt.fill_between(np.log10(distrfracs), radmeans.nanmin(axis=1), radmeans.nanmax(axis=1))
+plt.fill_between(np.log10(distrfracs), radmeans.min(axis=1), radmeans.max(axis=1))
 xlabel('poison fraction (log)')
 ylabel('half-width-half-min')
+print(experiment.log_figure()['web'])
 

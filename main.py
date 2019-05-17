@@ -403,7 +403,7 @@ class Model:
     acc = np.zeros(len(cfeed))
 
   # continuously loop to get many rollouts
-    for trial in range(100):
+    for trial in range(2000):
       
       # produce random direction
       tic = time()

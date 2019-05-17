@@ -1,8 +1,9 @@
 import pickle
 import numpy as np
 from scipy import stats
+import matplotlib.pyplot as plt
 
-def rollout2rad(expt):
+def rollout2rad(expt, experiment=None, distrfrac=None):
   
   if not expt.asset_list:
     return None
@@ -34,8 +35,12 @@ def rollout2rad(expt):
 
   # plot all rollouts
   x = 1 * np.linspace(-1, 1, m)
-  # plot(x, np.log10(xents.T))
-  # print(experiment.log_figure()['web'])
+  if experiment:
+    plt.plot(x, (xents.T))
+    plt.title(expt.name + str(distrfrac))
+    plt.ylim(0, 50)
+    print(experiment.log_figure()['web'])
+    plt.clf()
 
   # define threshold as the half width half min
   thresh = mode * 2
