@@ -30,13 +30,11 @@ for i, expt in enumerate(experiments):
   # while sum([process.poll() is None for process in processes]) > 60:
   #   sleep(5)
 
-  gpu = i % 3
-  # gpu += 1
   sugg = expt.name + '-rollout'
   tag = 'rollout-7'
   pretrain_dir = join('ckpt/swissroll', projname, expt.name)
   pretrain_url = utils.get_dropbox_url(pretrain_dir)
-  command = 'python main.py -seed=1237 -ndata=400 -noise=.5 -gpu=%s -rollout -nspan=601 -span=1 -nhidden 23 16 26 32 28 31 -sugg=%s -tag=%s -pretrain_url=%s' % (gpu, sugg, tag, pretrain_url)
+  command = 'python main.py -seed=1237 -ndata=400 -noise=.5 -rollout -nspan=601 -span=1 -nhidden 23 16 26 32 28 31 -sugg=%s -tag=%s -pretrain_url=%s' % (gpu, sugg, tag, pretrain_url)
   # processes.append(subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding='utf-8'))
   f.write(command + '\n')
   
